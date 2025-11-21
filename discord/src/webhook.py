@@ -20,6 +20,7 @@ class WebhookServer:
 
     def _setup_routes(self):
         """Set up webhook routes."""
+        self.app.router.add_get('/', self.home)
         self.app.router.add_post('/callback', self.handle_callback)
         self.app.router.add_get('/health', self.health_check)
 
@@ -68,6 +69,11 @@ class WebhookServer:
                 {'error': 'Internal server error'},
                 status=500
             )
+
+    async def home(self, request: web.Request) -> web.Response:
+        """Welcome page."""
+        text = "You found Weave Bot!\nSay hi at https://oaklog.org"
+        return web.Response(text=text, content_type='text/plain')
 
     async def health_check(self, request: web.Request) -> web.Response:
         """Health check endpoint."""
