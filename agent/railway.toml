@@ -1,0 +1,7 @@
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "playwright install chromium && python -m agent.main"
+healthcheckPath = "/health"
+healthcheckTimeout = 300

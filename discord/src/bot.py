@@ -27,9 +27,12 @@ class WeaveBotClient(discord.Client):
         self.agent_api_url = Config.AGENT_API_URL
         self.monitored_channels = set(Config.DISCORD_CHANNELS)
 
-        # Build callback URL for agent to POST results back
-        # Agent will POST to this URL when parsing completes
-        self.callback_url = f"http://{Config.WEBHOOK_HOST}:{Config.WEBHOOK_PORT}/callback"
+        # Callback URL for agent to POST results back
+        # Use explicit CALLBACK_URL if set (for Railway), otherwise build from host/port
+        if Config.CALLBACK_URL:
+            self.callback_url = Config.CALLBACK_URL
+        else:
+            self.callback_url = f"http://{Config.WEBHOOK_HOST}:{Config.WEBHOOK_PORT}/callback"
 
     async def on_ready(self):
         """Called when the bot is ready."""

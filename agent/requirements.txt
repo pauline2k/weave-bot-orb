@@ -1,0 +1,21 @@
+# Web framework
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# Browser automation
+playwright>=1.40.0
+
+# LLM
+google-generativeai>=0.3.0
+
+# Content extraction
+trafilatura>=1.6.0
+html2text>=2020.1.16
+
+# HTTP client (for callbacks)
+aiohttp>=3.9.0
+
+# Image processing (for screenshots)
+Pillow>=10.0.0

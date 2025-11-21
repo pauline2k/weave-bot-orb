@@ -22,6 +22,11 @@ class Config:
     WEBHOOK_PORT: int = int(os.getenv("WEBHOOK_PORT", "3000"))
     WEBHOOK_HOST: str = os.getenv("WEBHOOK_HOST", "0.0.0.0")
 
+    # Callback URL - what the agent uses to reach back to us
+    # On Railway, set this to the Discord service's internal URL
+    # e.g., "http://discord-bot.railway.internal:3000/callback"
+    CALLBACK_URL: str = os.getenv("CALLBACK_URL", "")
+
     # Database settings
     DB_PATH: str = os.getenv("DB_PATH", "weave_bot.db")
 
