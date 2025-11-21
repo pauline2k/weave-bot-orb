@@ -1,0 +1,18 @@
+[project]
+name = "weave-discord-bot"
+version = "0.1.0"
+description = "Discord bot for parsing event links"
+requires-python = ">=3.11"
+dependencies = [
+    "discord.py>=2.3.2",
+    "aiohttp>=3.9.0",
+    "python-dotenv>=1.0.0",
+    "certifi>=2025.11.12",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
