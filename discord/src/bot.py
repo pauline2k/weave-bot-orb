@@ -55,6 +55,11 @@ class WeaveBotClient(discord.Client):
             await self._handle_calendar_command(message)
             return
 
+        # Check if this is a reply to a bot message (for editorial updates)
+        if message.reference and message.reference.message_id:
+            await self._handle_potential_editorial_reply(message)
+            # Don't return - it might also contain a link to parse
+
         # Check if message contains a link
         if not is_link_message(message.content):
             return
@@ -145,7 +150,8 @@ class WeaveBotClient(discord.Client):
         status: str,
         event: Optional[dict] = None,
         error: Optional[str] = None,
-        result_url: Optional[str] = None
+        result_url: Optional[str] = None,
+        grist_record_id: Optional[int] = None
     ):
         """
         Handle completion callback from the agent.
@@ -157,7 +163,8 @@ class WeaveBotClient(discord.Client):
             status: "completed" or "failed"
             event: Extracted event data (if successful)
             error: Error message (if failed)
-            result_url: URL to saved record (future: Grist link)
+            result_url: URL to saved record (Grist link)
+            grist_record_id: Grist row ID for editorial updates
         """
         # Update database
         parse_status = ParseStatus.COMPLETED if status == "completed" else ParseStatus.FAILED
@@ -166,6 +173,10 @@ class WeaveBotClient(discord.Client):
             parse_status,
             result_url
         )
+
+        # Store grist_record_id if provided
+        if grist_record_id:
+            await self.db.update_grist_record_id(agent_request_id, grist_record_id)
 
         if not request:
             logger.error(f'No request found for agent ID {agent_request_id}')
@@ -223,6 +234,124 @@ class WeaveBotClient(discord.Client):
             logger.error(f'No permission to access message {request.discord_response_id}')
         except Exception as e:
             logger.error(f'Error handling parse completion: {e}')
+
+    async def _handle_potential_editorial_reply(self, message: discord.Message):
+        """
+        Check if this message is a reply to a parsed event and update editorial text.
+
+        When a user replies to the bot's event confirmation message, their reply
+        text becomes the editorial commentary in Grist.
+        """
+        try:
+            # Get the message being replied to
+            replied_to_id = message.reference.message_id
+
+            # Check if the replied-to message is one of our event responses
+            request = await self.db.get_by_response_id(replied_to_id)
+
+            if not request:
+                # Not a reply to an event we parsed
+                return
+
+            if not request.grist_record_id:
+                logger.warning(
+                    f"Reply to event message {replied_to_id} but no grist_record_id stored"
+                )
+                return
+
+            # Get the editorial text (the user's reply content)
+            editorial_text = message.content.strip()
+
+            if not editorial_text:
+                return
+
+            logger.info(
+                f"Updating editorial for grist_record_id={request.grist_record_id}: "
+                f"{editorial_text[:50]}..."
+            )
+
+            # Update Grist
+            success = await self._update_grist_editorial(
+                request.grist_record_id,
+                editorial_text
+            )
+
+            if success:
+                # React to confirm the update
+                await message.add_reaction("✅")
+                logger.info(f"Editorial updated for record {request.grist_record_id}")
+            else:
+                await message.add_reaction("❌")
+                await message.reply(
+                    "Sorry, I couldn't update the editorial text. Please try again.",
+                    delete_after=10
+                )
+
+        except Exception as e:
+            logger.error(f"Error handling editorial reply: {e}")
+
+    async def _update_grist_editorial(
+        self,
+        record_id: int,
+        editorial_text: str
+    ) -> bool:
+        """
+        Update the Editorial field in Grist for a specific record.
+
+        Args:
+            record_id: Grist row ID
+            editorial_text: Text to set as editorial
+
+        Returns:
+            True if successful, False otherwise
+        """
+        grist_api_key = Config.GRIST_API_KEY
+        grist_doc_id = Config.GRIST_DOC_ID
+
+        if not grist_api_key or not grist_doc_id:
+            logger.error("Grist not configured for editorial update")
+            return False
+
+        url = f"https://docs.getgrist.com/api/docs/{grist_doc_id}/tables/Events/records"
+
+        payload = {
+            "records": [
+                {
+                    "id": record_id,
+                    "fields": {
+                        "Editorial": editorial_text
+                    }
+                }
+            ]
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.patch(
+                    url,
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {grist_api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 200:
+                        return True
+                    else:
+                        body = await response.text()
+                        logger.error(
+                            f"Grist API error updating editorial: "
+                            f"status={response.status}, body={body}"
+                        )
+                        return False
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Grist connection error: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error updating Grist: {e}")
+            return False
 
     async def _handle_calendar_command(self, message: discord.Message):
         """

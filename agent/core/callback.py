@@ -16,6 +16,7 @@ async def send_callback(
     event: Optional[Event] = None,
     error: Optional[str] = None,
     result_url: Optional[str] = None,
+    grist_record_id: Optional[int] = None,
     timeout: float = 10.0
 ) -> bool:
     """
@@ -28,7 +29,8 @@ async def send_callback(
         status: "completed" or "failed"
         event: Extracted event data (if successful)
         error: Error message (if failed)
-        result_url: URL to saved record (future: Grist integration)
+        result_url: URL to saved record (Grist)
+        grist_record_id: Grist row ID for editorial updates
         timeout: Request timeout in seconds
 
     Returns:
@@ -40,7 +42,8 @@ async def send_callback(
         status=status,
         event=event,
         error=error,
-        result_url=result_url
+        result_url=result_url,
+        grist_record_id=grist_record_id
     )
 
     try:

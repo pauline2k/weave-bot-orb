@@ -96,12 +96,15 @@ class TaskRunner:
 
         # Save to Grist if successful
         result_url = None
+        grist_record_id = None
         if status == "completed" and event:
             grist_result = await save_event_to_grist(event)
             if grist_result.success:
                 result_url = grist_result.record_url
+                grist_record_id = grist_result.record_id
                 logger.info(
-                    f"Task {task.request_id} saved to Grist: {result_url}"
+                    f"Task {task.request_id} saved to Grist: {result_url}, "
+                    f"record_id={grist_record_id}"
                 )
             else:
                 # Log but don't fail the whole task
@@ -117,7 +120,8 @@ class TaskRunner:
             status=status,
             event=event,
             error=error,
-            result_url=result_url
+            result_url=result_url,
+            grist_record_id=grist_record_id
         )
 
     def get_active_count(self) -> int:

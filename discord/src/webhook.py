@@ -46,6 +46,7 @@ class WebhookServer:
             event = data.get('event')
             error = data.get('error')
             result_url = data.get('result_url')
+            grist_record_id = data.get('grist_record_id')
 
             if not request_id or not status:
                 logger.error(f'Invalid callback payload: {data}')
@@ -56,7 +57,7 @@ class WebhookServer:
 
             logger.info(
                 f'Received callback for request {request_id} '
-                f'with status {status}'
+                f'with status {status}, grist_record_id={grist_record_id}'
             )
 
             # Handle the completion in the bot
@@ -65,7 +66,8 @@ class WebhookServer:
                 status,
                 event=event,
                 error=error,
-                result_url=result_url
+                result_url=result_url,
+                grist_record_id=grist_record_id
             )
 
             return web.json_response({'success': True})

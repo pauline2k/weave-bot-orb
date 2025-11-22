@@ -22,6 +22,7 @@ class ParseRequest:
     agent_request_id: Optional[str]
     status: ParseStatus
     result_url: Optional[str]
+    grist_record_id: Optional[int]  # Grist row ID for editorial updates
     created_at: str
     updated_at: str
 
@@ -57,6 +58,7 @@ class Database:
                     agent_request_id TEXT,
                     status TEXT NOT NULL,
                     result_url TEXT,
+                    grist_record_id INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -67,6 +69,18 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_agent_request_id
                 ON parse_requests(agent_request_id)
             """)
+
+            # Index for quick lookups by discord_response_id (for reply detection)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_discord_response_id
+                ON parse_requests(discord_response_id)
+            """)
+
+            # Migration: Add grist_record_id column if it doesn't exist
+            cursor = conn.execute("PRAGMA table_info(parse_requests)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if 'grist_record_id' not in columns:
+                conn.execute("ALTER TABLE parse_requests ADD COLUMN grist_record_id INTEGER")
 
             conn.commit()
         finally:
@@ -191,6 +205,7 @@ class Database:
                     agent_request_id=row["agent_request_id"],
                     status=ParseStatus(row["status"]),
                     result_url=row["result_url"],
+                    grist_record_id=row["grist_record_id"],
                     created_at=row["created_at"],
                     updated_at=row["updated_at"]
                 )
@@ -216,9 +231,63 @@ class Database:
                     agent_request_id=row["agent_request_id"],
                     status=ParseStatus(row["status"]),
                     result_url=row["result_url"],
+                    grist_record_id=row["grist_record_id"],
                     created_at=row["created_at"],
                     updated_at=row["updated_at"]
                 )
             return None
+        finally:
+            conn.close()
+
+    async def get_by_response_id(self, discord_response_id: int) -> Optional[ParseRequest]:
+        """Get a parse request by Discord response ID (bot's reply message)."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                "SELECT * FROM parse_requests WHERE discord_response_id = ?",
+                (discord_response_id,)
+            )
+            row = cursor.fetchone()
+
+            if row:
+                return ParseRequest(
+                    id=row["id"],
+                    discord_message_id=row["discord_message_id"],
+                    discord_response_id=row["discord_response_id"],
+                    agent_request_id=row["agent_request_id"],
+                    status=ParseStatus(row["status"]),
+                    result_url=row["result_url"],
+                    grist_record_id=row["grist_record_id"],
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"]
+                )
+            return None
+        finally:
+            conn.close()
+
+    async def update_grist_record_id(
+        self,
+        agent_request_id: str,
+        grist_record_id: int
+    ) -> bool:
+        """Update the Grist record ID for a parse request."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute(
+                """
+                UPDATE parse_requests
+                SET grist_record_id = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE agent_request_id = ?
+                """,
+                (grist_record_id, agent_request_id)
+            )
+            conn.commit()
+            updated = cursor.rowcount > 0
+            logger.info(f'Updated grist_record_id in DB: agent_request_id={agent_request_id}, grist_record_id={grist_record_id}, rows_updated={cursor.rowcount}')
+            return updated
         finally:
             conn.close()

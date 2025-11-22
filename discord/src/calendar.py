@@ -56,6 +56,7 @@ async def fetch_events_from_grist(
                             "description": fields.get("Description"),
                             "source_url": fields.get("SourceURL"),
                             "price": fields.get("Price"),
+                            "editorial": fields.get("Editorial"),
                         })
 
                     return events
@@ -165,10 +166,15 @@ def generate_orb_calendar_markdown(events: list[dict]) -> str:
             # Build event line
             event_line = f"**{time_str}, {location}**."
 
-            # Add description if available
+            # Use editorial if available, otherwise fall back to description
+            editorial = event.get("editorial")
             description = event.get("description")
-            if description:
-                # Truncate if too long
+
+            if editorial:
+                # Editorial is human-written, use it directly
+                event_line += f" {editorial}"
+            elif description:
+                # Truncate auto-generated description if too long
                 if len(description) > 200:
                     description = description[:197] + "..."
                 event_line += f" {description}"

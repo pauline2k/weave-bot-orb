@@ -124,5 +124,9 @@ class CallbackPayload(BaseModel):
     error: Optional[str] = None
     result_url: Optional[str] = Field(
         default=None,
-        description="URL to saved event record (future: Grist integration)"
+        description="URL to saved event record (Grist)"
+    )
+    grist_record_id: Optional[int] = Field(
+        default=None,
+        description="Grist row ID for the saved event (for editorial updates)"
     )
