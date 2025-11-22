@@ -30,6 +30,10 @@ class Config:
     # Database settings
     DB_PATH: str = os.getenv("DB_PATH", "weave_bot.db")
 
+    # Grist settings (for calendar export)
+    GRIST_API_KEY: str = os.getenv("GRIST_API_KEY", "")
+    GRIST_DOC_ID: str = os.getenv("GRIST_DOC_ID", "b2r9qYM2Lr9xJ2epHVV1K2")
+
     @classmethod
     def validate(cls) -> None:
         """Validate required configuration."""

@@ -8,6 +8,7 @@ from typing import Optional
 from src.config import Config
 from src.database import Database, ParseStatus
 from src.utils import is_link_message, extract_url
+from src.calendar import get_calendar_export
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,6 +48,11 @@ class WeaveBotClient(discord.Client):
 
         # Only process messages in monitored channels
         if message.channel.id not in self.monitored_channels:
+            return
+
+        # Check for !calendar command
+        if message.content.strip().lower() == "!calendar":
+            await self._handle_calendar_command(message)
             return
 
         # Check if message contains a link
@@ -217,6 +223,55 @@ class WeaveBotClient(discord.Client):
             logger.error(f'No permission to access message {request.discord_response_id}')
         except Exception as e:
             logger.error(f'Error handling parse completion: {e}')
+
+    async def _handle_calendar_command(self, message: discord.Message):
+        """
+        Handle the !calendar command - export events from Grist as ORB markdown.
+        """
+        logger.info(f"Calendar export requested by {message.author}")
+
+        # Check if Grist is configured
+        grist_api_key = Config.GRIST_API_KEY
+        grist_doc_id = Config.GRIST_DOC_ID
+
+        if not grist_api_key or not grist_doc_id:
+            await message.reply("Grist is not configured. Set GRIST_API_KEY and GRIST_DOC_ID.")
+            return
+
+        # Send initial response
+        response = await message.reply("📅 Generating calendar export...")
+
+        try:
+            # Fetch and format events
+            markdown = await get_calendar_export(grist_api_key, grist_doc_id)
+
+            # Discord has a 2000 char limit, so we may need to split
+            if len(markdown) <= 1900:
+                await response.edit(content=f"```markdown\n{markdown}\n```")
+            else:
+                # Split into chunks
+                await response.edit(content="Calendar export (split due to length):")
+
+                # Split by day sections
+                chunks = []
+                current_chunk = ""
+                for line in markdown.split("\n"):
+                    if len(current_chunk) + len(line) + 1 > 1800:
+                        chunks.append(current_chunk)
+                        current_chunk = line
+                    else:
+                        current_chunk += "\n" + line if current_chunk else line
+                if current_chunk:
+                    chunks.append(current_chunk)
+
+                for chunk in chunks:
+                    await message.channel.send(f"```markdown\n{chunk}\n```")
+
+            logger.info(f"Calendar export completed, {len(markdown)} chars")
+
+        except Exception as e:
+            logger.error(f"Error generating calendar: {e}")
+            await response.edit(content="Sorry, there was an error generating the calendar export.")
 
     def _format_event_reply(self, event: dict, result_url: Optional[str] = None) -> str:
         """
