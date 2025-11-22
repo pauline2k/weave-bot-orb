@@ -157,14 +157,12 @@ def generate_orb_calendar_markdown(events: list[dict]) -> str:
         day_events = sorted(events_by_day[day], key=lambda e: e["day_sort"])
 
         for event in day_events:
+            title = event.get("title") or "Untitled Event"
             time_str = event["time_str"]
-            location = format_location_for_orb(
-                event.get("venue"),
-                event.get("city")
-            )
+            venue = event.get("venue") or "Location TBD"
 
-            # Build event line
-            event_line = f"**{time_str}, {location}**."
+            # Build event line: **Title**, time, venue. Editorial. [[link]]
+            event_line = f"**{title}**, {time_str}, {venue}."
 
             # Only show editorial text (human-written commentary)
             editorial = event.get("editorial")
