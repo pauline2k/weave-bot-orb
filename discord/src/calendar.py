@@ -89,14 +89,18 @@ async def fetch_events_from_grist(
                         fields = record.get("fields", {})
                         event_ts = fields.get("StartDatetime")
 
+                        # Skip events without a valid date (TBD events)
+                        if not event_ts:
+                            continue
+
                         # Apply date filter if specified
-                        if start_ts and end_ts and event_ts:
+                        if start_ts and end_ts:
                             if not (start_ts <= event_ts <= end_ts):
                                 continue
-                        elif start_ts and event_ts:
+                        elif start_ts:
                             if event_ts < start_ts:
                                 continue
-                        elif end_ts and event_ts:
+                        elif end_ts:
                             if event_ts > end_ts:
                                 continue
 
