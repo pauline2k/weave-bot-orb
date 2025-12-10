@@ -229,3 +229,169 @@ Return your JSON response now:"""
             confidence_score=0.0,
             extraction_notes=error_msg + (f"\nLast response: {response_text[:300]}" if response_text else "")
         )
+
+    def _build_image_extraction_prompt(self) -> str:
+        """Build the prompt for extracting event info from an image."""
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        current_year = datetime.now().year
+
+        return f"""You are an expert at extracting event information from images such as event posters, flyers, screenshots, and promotional materials.
+
+Today's date is: {current_date}
+
+Analyze the attached image and extract event information. Return valid JSON matching this exact schema:
+
+{{
+  "title": "string (required - the event name/title)",
+  "description": "string or null (event description/details visible in the image)",
+  "start_datetime": "ISO 8601 datetime string or null (e.g., '2025-11-20T18:30:00')",
+  "end_datetime": "ISO 8601 datetime string or null",
+  "timezone": "string or null (e.g., 'America/Los_Angeles', 'PST', 'UTC-8')",
+  "location": {{
+    "type": "physical" | "virtual" | "hybrid",
+    "venue": "string or null (venue name)",
+    "address": "string or null (full address)",
+    "city": "string or null",
+    "url": "string or null (for virtual events)"
+  }} or null,
+  "organizer": {{
+    "name": "string or null",
+    "contact": "string or null (email or phone)",
+    "url": "string or null"
+  }} or null,
+  "registration_url": "string or null (link visible in image)",
+  "price": "string or null (e.g., 'Free', '$20', '$10-$25')",
+  "tags": ["array", "of", "strings"],
+  "image_url": null,
+  "confidence_score": number between 0 and 1 (your confidence in this extraction),
+  "extraction_notes": "string or null (note any text that's hard to read, cut off, or unclear)"
+}}
+
+IMPORTANT INSTRUCTIONS:
+1. Return ONLY valid JSON, no markdown code blocks or other text
+2. Use null for any fields you cannot determine from the image
+3. For dates/times:
+   - If only a date is shown without time, set a reasonable time based on context (evening events ~19:00)
+   - Use {current_year} as the year if no year is shown and the date hasn't passed
+   - If the month/day has already passed this year and no year shown, use {current_year + 1}
+4. Read ALL text in the image carefully - event details are often in smaller text
+5. Set confidence_score LOWER if:
+   - Text is blurry, small, or hard to read
+   - Information appears cut off or partially visible
+   - Image quality is poor
+   - You had to make assumptions about unclear text
+6. Use extraction_notes to document:
+   - Any text you couldn't read clearly
+   - Assumptions you made
+   - Parts of the image that seem cut off
+
+Return your JSON response now:"""
+
+    async def extract_event_from_image(
+        self,
+        image_b64: str,
+        source_description: Optional[str] = None
+    ) -> Event:
+        """
+        Extract event information from an image using Gemini.
+
+        Args:
+            image_b64: Base64-encoded image data
+            source_description: Optional description of where the image came from
+
+        Returns:
+            Extracted Event object
+        """
+        prompt = self._build_image_extraction_prompt()
+
+        # Decode image
+        try:
+            image_bytes = base64.b64decode(image_b64)
+            image = Image.open(io.BytesIO(image_bytes))
+        except Exception as e:
+            logger.error(f"Failed to decode image: {e}")
+            return Event(
+                title="Extraction Failed",
+                source_url=None,
+                confidence_score=0.0,
+                extraction_notes=f"Failed to decode image: {str(e)}"
+            )
+
+        # Prepare content parts for Gemini: [prompt, image]
+        parts = [prompt, image]
+
+        # Retry loop with exponential backoff
+        last_error = None
+        response_text = ""
+
+        for attempt in range(self.max_retries):
+            try:
+                # Generate response
+                response = self.model.generate_content(parts)
+                response_text = self._clean_response_text(response.text)
+
+                # Try to parse JSON
+                try:
+                    event_data = json.loads(response_text)
+                except json.JSONDecodeError as json_error:
+                    # Attempt JSON repair
+                    logger.warning(f"JSON parse failed, attempting repair: {json_error}")
+                    event_data = self._repair_json(response_text)
+
+                    if event_data is None:
+                        raise json_error
+
+                    # Mark as repaired
+                    existing_notes = event_data.get('extraction_notes', '') or ''
+                    event_data['extraction_notes'] = f"JSON parsing required repair. {existing_notes}".strip()
+                    logger.info("JSON repair successful")
+
+                # No source URL for image-only extraction
+                event_data['source_url'] = None
+
+                # Add source description to notes if provided
+                if source_description:
+                    existing_notes = event_data.get('extraction_notes', '') or ''
+                    event_data['extraction_notes'] = f"Source: {source_description}. {existing_notes}".strip()
+
+                # Convert to Event object (Pydantic will validate)
+                event = Event(**event_data)
+                return event
+
+            except Exception as e:
+                last_error = e
+                error_str = str(e)
+
+                # Check for rate limit (429) error
+                if "429" in error_str and attempt < self.max_retries - 1:
+                    sleep_time = self.base_delay * (2 ** attempt)
+                    logger.warning(f"Rate limited (429), retrying in {sleep_time}s (attempt {attempt + 1}/{self.max_retries})")
+                    await asyncio.sleep(sleep_time)
+                    continue
+
+                # Check for quota exhausted
+                if "quota" in error_str.lower() and attempt < self.max_retries - 1:
+                    sleep_time = self.base_delay * (2 ** attempt)
+                    logger.warning(f"Quota issue, retrying in {sleep_time}s (attempt {attempt + 1}/{self.max_retries})")
+                    await asyncio.sleep(sleep_time)
+                    continue
+
+                # For other errors on non-final attempt, retry with shorter delay
+                if attempt < self.max_retries - 1:
+                    logger.warning(f"Image extraction error, retrying: {error_str[:100]}")
+                    await asyncio.sleep(1)
+                    continue
+
+                # Final attempt failed
+                break
+
+        # All retries exhausted
+        error_msg = f"Failed after {self.max_retries} attempts: {str(last_error)}"
+        logger.error(f"Image extraction failed: {error_msg}")
+
+        return Event(
+            title="Extraction Failed",
+            source_url=None,
+            confidence_score=0.0,
+            extraction_notes=error_msg + (f"\nLast response: {response_text[:300]}" if response_text else "")
+        )

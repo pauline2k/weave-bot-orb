@@ -149,3 +149,70 @@ class ScrapingOrchestrator:
                 error=f"Unexpected error in scraping pipeline: {str(e)}",
                 metadata={**metadata, "stage": "unknown", "exception": str(e)}
             )
+
+    async def analyze_image(
+        self,
+        image_b64: str,
+        source_description: Optional[str] = None
+    ) -> ScrapeResponse:
+        """
+        Extract event information from an image.
+
+        This is for parsing event posters, flyers, screenshots, etc.
+        No browser/HTML processing is needed - goes straight to LLM.
+
+        Args:
+            image_b64: Base64-encoded image data
+            source_description: Optional description of where the image came from
+
+        Returns:
+            ScrapeResponse with event data or error information
+        """
+        metadata = {
+            "parse_mode": "image",
+            "source_description": source_description,
+            "image_size_b64": len(image_b64) if image_b64 else 0
+        }
+
+        try:
+            # Direct LLM extraction from image - no browser step needed
+            event = await self.llm_extractor.extract_event_from_image(
+                image_b64=image_b64,
+                source_description=source_description
+            )
+
+            metadata["confidence_score"] = event.confidence_score
+
+            # Check if extraction was successful
+            if event.title == "Extraction Failed":
+                return ScrapeResponse(
+                    success=False,
+                    event=event,
+                    error="Image extraction failed",
+                    metadata={**metadata, "stage": "image_extraction"}
+                )
+
+            # Low confidence check
+            if event.confidence_score and event.confidence_score < 0.3:
+                return ScrapeResponse(
+                    success=True,
+                    event=event,
+                    error="Low confidence extraction - image may be unclear",
+                    metadata={**metadata, "stage": "completed", "warning": "low_confidence"}
+                )
+
+            # Full success
+            return ScrapeResponse(
+                success=True,
+                event=event,
+                error=None,
+                metadata={**metadata, "stage": "completed"}
+            )
+
+        except Exception as e:
+            return ScrapeResponse(
+                success=False,
+                event=None,
+                error=f"Unexpected error in image analysis: {str(e)}",
+                metadata={**metadata, "stage": "unknown", "exception": str(e)}
+            )

@@ -22,7 +22,7 @@ class EventOrganizer(BaseModel):
 
 
 class Event(BaseModel):
-    """Structured event data extracted from a webpage."""
+    """Structured event data extracted from a webpage or image."""
     title: str = "Unknown Event"  # Default fallback if LLM returns null
     description: Optional[str] = None
     start_datetime: Optional[datetime] = None
@@ -34,7 +34,7 @@ class Event(BaseModel):
     price: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     image_url: Optional[str] = None
-    source_url: str  # The URL we scraped from
+    source_url: Optional[str] = None  # The URL we scraped from (optional for image-only)
     confidence_score: Optional[float] = Field(
         default=None,
         ge=0.0,
@@ -74,18 +74,34 @@ class ScrapeResponse(BaseModel):
 
 class ParseRequest(BaseModel):
     """
-    Async request to parse an event from a URL.
+    Async request to parse an event from a URL and/or image.
 
     Unlike ScrapeRequest, this returns immediately with a request_id
     and sends results via callback when complete.
+
+    Supports three modes:
+    - "url": Parse event from a webpage (default, existing behavior)
+    - "image": Parse event from an uploaded image (flyer, poster, screenshot)
+    - "hybrid": Parse from both URL and image together
     """
-    url: HttpUrl
+    url: Optional[HttpUrl] = Field(
+        default=None,
+        description="URL to scrape (required for 'url' and 'hybrid' modes)"
+    )
     callback_url: HttpUrl = Field(
         description="URL to POST results when parsing completes"
     )
     discord_message_id: Optional[int] = Field(
         default=None,
         description="Discord message ID for tracking (passed through to callback)"
+    )
+    parse_mode: Literal["url", "image", "hybrid"] = Field(
+        default="url",
+        description="Parsing mode: 'url' for webpage, 'image' for uploaded image, 'hybrid' for both"
+    )
+    image_base64: Optional[str] = Field(
+        default=None,
+        description="Base64-encoded image data (required for 'image' and 'hybrid' modes)"
     )
     include_screenshot: bool = True
     wait_time: int = Field(

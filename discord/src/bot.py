@@ -1,4 +1,5 @@
-"""Discord bot for parsing event links."""
+"""Discord bot for parsing event links and images."""
+import base64
 import discord
 from discord.ext import commands
 import aiohttp
@@ -7,7 +8,7 @@ from typing import Optional
 
 from src.config import Config
 from src.database import Database, ParseStatus
-from src.utils import is_link_message, extract_url
+from src.utils import is_link_message, extract_url, has_image_attachments, extract_image_attachments
 from src.calendar import get_calendar_export
 
 logging.basicConfig(
@@ -58,21 +59,31 @@ class WeaveBotClient(discord.Client):
         # Check if this is a reply to a bot message (for editorial updates)
         if message.reference and message.reference.message_id:
             await self._handle_potential_editorial_reply(message)
-            # Don't return - it might also contain a link to parse
+            # Don't return - it might also contain a link or image to parse
 
-        # Check if message contains a link
-        if not is_link_message(message.content):
+        # Check for parseable content: URL or images
+        url = extract_url(message.content) if is_link_message(message.content) else None
+        images = extract_image_attachments(message)
+
+        # Nothing to parse
+        if not url and not images:
             return
 
-        logger.info(f'Processing message {message.id} with link: {message.content}')
+        # Determine parse mode and what we're processing
+        if url and images:
+            parse_mode = "hybrid"
+            target_desc = f"link + {len(images)} image(s)"
+        elif images:
+            parse_mode = "image"
+            target_desc = f"{len(images)} image(s)"
+        else:
+            parse_mode = "url"
+            target_desc = "event link"
 
-        # Extract the URL
-        url = extract_url(message.content)
-        if not url:
-            return
+        logger.info(f'Processing message {message.id} ({parse_mode}): url={url}, images={len(images)}')
 
         # Send initial response
-        response = await message.reply("⏳ Parsing event...")
+        response = await message.reply(f"⏳ Parsing {target_desc}...")
 
         # Store in database
         await self.db.create_request(
@@ -80,9 +91,27 @@ class WeaveBotClient(discord.Client):
             discord_response_id=response.id
         )
 
+        # Download image if present (use first image for now)
+        image_b64 = None
+        if images:
+            image_b64 = await self._download_image(images[0]['url'])
+            if not image_b64:
+                logger.warning(f'Failed to download image for message {message.id}')
+                if parse_mode == "image":
+                    # Image-only mode but download failed
+                    await response.edit(content="Sorry, I couldn't download that image. Could you try uploading it again?")
+                    return
+                # For hybrid mode, continue with URL only
+                parse_mode = "url"
+
         # Send to agent API
         try:
-            agent_id = await self._send_to_agent(url, message.id)
+            agent_id = await self._send_to_agent(
+                url=url,
+                message_id=message.id,
+                parse_mode=parse_mode,
+                image_b64=image_b64
+            )
 
             if agent_id:
                 # Update database with agent ID
@@ -100,31 +129,85 @@ class WeaveBotClient(discord.Client):
             logger.error(f'Error processing message {message.id}: {e}')
             await response.edit(content="Hmm, I'm having trouble connecting right now. Mind trying again in a moment?")
 
-    async def _send_to_agent(self, url: str, message_id: int) -> Optional[str]:
+    async def _download_image(self, image_url: str) -> Optional[str]:
         """
-        Send URL to agent API for async parsing.
+        Download an image from a URL and return it as base64.
+
+        Args:
+            image_url: URL to download the image from (Discord CDN)
+
+        Returns:
+            Base64-encoded image data, or None if download failed.
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    image_url,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status == 200:
+                        image_bytes = await response.read()
+                        # Check size - limit to 10MB for safety
+                        if len(image_bytes) > 10 * 1024 * 1024:
+                            logger.warning(f'Image too large: {len(image_bytes)} bytes')
+                            return None
+                        return base64.b64encode(image_bytes).decode('utf-8')
+                    else:
+                        logger.error(f'Failed to download image: status {response.status}')
+                        return None
+        except aiohttp.ClientError as e:
+            logger.error(f'Error downloading image: {e}')
+            return None
+        except Exception as e:
+            logger.error(f'Unexpected error downloading image: {e}')
+            return None
+
+    async def _send_to_agent(
+        self,
+        url: Optional[str],
+        message_id: int,
+        parse_mode: str = "url",
+        image_b64: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Send parse request to agent API.
 
         The agent will:
         1. Return a request_id immediately
-        2. Process the URL in the background
+        2. Process the URL/image in the background
         3. POST results to our callback_url when done
+
+        Args:
+            url: URL to parse (optional for image-only mode)
+            message_id: Discord message ID for tracking
+            parse_mode: "url", "image", or "hybrid"
+            image_b64: Base64-encoded image data (for image/hybrid modes)
 
         Returns the agent request ID if successful, None otherwise.
         """
         try:
             async with aiohttp.ClientSession() as session:
                 payload = {
-                    "url": url,
                     "callback_url": self.callback_url,
-                    "discord_message_id": message_id
+                    "discord_message_id": message_id,
+                    "parse_mode": parse_mode
                 }
 
-                logger.info(f'Sending to agent: {payload}')
+                if url:
+                    payload["url"] = url
+                if image_b64:
+                    payload["image_base64"] = image_b64
+
+                # Log payload without the full base64 data
+                log_payload = {**payload}
+                if image_b64:
+                    log_payload["image_base64"] = f"<{len(image_b64)} chars>"
+                logger.info(f'Sending to agent: {log_payload}')
 
                 async with session.post(
                     self.agent_api_url,
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=10)
+                    timeout=aiohttp.ClientTimeout(total=30)  # Longer timeout for image uploads
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
