@@ -46,9 +46,9 @@ Your task is to extract event information and return it as valid JSON matching t
 {{
   "title": "string (required - the event name/title)",
   "description": "string or null (event description/details)",
-  "start_datetime": "ISO 8601 datetime string or null (e.g., '2025-11-20T18:30:00')",
-  "end_datetime": "ISO 8601 datetime string or null",
-  "timezone": "string or null (e.g., 'America/Los_Angeles', 'PST', 'UTC-8')",
+  "start_datetime": "ISO 8601 datetime WITH timezone offset (e.g., '2026-01-20T18:30:00-08:00')",
+  "end_datetime": "ISO 8601 datetime WITH timezone offset or null (e.g., '2026-01-20T21:00:00-08:00')",
+  "timezone": "string or null (e.g., 'America/Los_Angeles', 'PST') - also include offset in datetimes above",
   "location": {{
     "type": "physical" | "virtual" | "hybrid",
     "venue": "string or null (venue name)",
@@ -74,11 +74,14 @@ IMPORTANT INSTRUCTIONS:
 2. Use null for any fields you cannot determine
 3. For dates/times:
    - PREFER dates found in "STRUCTURED EVENT DATA" section if available - these are authoritative
-   - Otherwise, use {current_year} as the year unless a different year is explicitly shown
-   - If no year is specified and the month/day has passed, use {current_year + 1}
-   - NEVER guess past years - trust explicit dates in the content or default to {current_year}
-4. If the page contains MULTIPLE events, extract the PRIMARY or FIRST event
-5. For timezone: try to infer from location or context if not explicit
+   - Use {current_year} as the year unless a different year is explicitly shown
+   - Exception: In Nov/Dec, if the event is for Jan/Feb without a year, use {current_year + 1}
+   - When in doubt, assume the current year ({current_year})
+4. For timezone:
+   - ALWAYS include timezone offset in the datetime string
+   - Default to Pacific Time: -08:00 (PST, Nov-Mar) or -07:00 (PDT, Mar-Nov)
+   - Only use a different timezone if explicitly stated in the content
+5. If the page contains MULTIPLE events, extract the PRIMARY or FIRST event
 6. Set confidence_score based on how complete and certain the information is
 7. Use extraction_notes to explain any assumptions, missing data, or ambiguities
 
@@ -244,9 +247,9 @@ Analyze the attached image and extract event information. Return valid JSON matc
 {{
   "title": "string (required - the event name/title)",
   "description": "string or null (event description/details visible in the image)",
-  "start_datetime": "ISO 8601 datetime string or null (e.g., '2025-11-20T18:30:00')",
-  "end_datetime": "ISO 8601 datetime string or null",
-  "timezone": "string or null (e.g., 'America/Los_Angeles', 'PST', 'UTC-8')",
+  "start_datetime": "ISO 8601 datetime WITH timezone offset (e.g., '2026-01-20T18:30:00-08:00')",
+  "end_datetime": "ISO 8601 datetime WITH timezone offset or null (e.g., '2026-01-20T21:00:00-08:00')",
+  "timezone": "string or null (e.g., 'America/Los_Angeles', 'PST') - also include offset in datetimes above",
   "location": {{
     "type": "physical" | "virtual" | "hybrid",
     "venue": "string or null (venue name)",
@@ -272,15 +275,20 @@ IMPORTANT INSTRUCTIONS:
 2. Use null for any fields you cannot determine from the image
 3. For dates/times:
    - If only a date is shown without time, set a reasonable time based on context (evening events ~19:00)
-   - Use {current_year} as the year if no year is shown and the date hasn't passed
-   - If the month/day has already passed this year and no year shown, use {current_year + 1}
-4. Read ALL text in the image carefully - event details are often in smaller text
-5. Set confidence_score LOWER if:
+   - Use {current_year} as the year unless a different year is explicitly shown
+   - Exception: In Nov/Dec, if the event is for Jan/Feb without a year, use {current_year + 1}
+   - When in doubt, assume the current year ({current_year})
+4. For timezone:
+   - ALWAYS include timezone offset in datetime (e.g., '2026-01-20T19:00:00-08:00')
+   - Default to Pacific Time: -08:00 (PST, Nov-Mar) or -07:00 (PDT, Mar-Nov)
+   - Only use a different timezone if explicitly stated in the image
+5. Read ALL text in the image carefully - event details are often in smaller text
+6. Set confidence_score LOWER if:
    - Text is blurry, small, or hard to read
    - Information appears cut off or partially visible
    - Image quality is poor
    - You had to make assumptions about unclear text
-6. Use extraction_notes to document:
+7. Use extraction_notes to document:
    - Any text you couldn't read clearly
    - Assumptions you made
    - Parts of the image that seem cut off
