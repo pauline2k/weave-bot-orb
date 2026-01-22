@@ -1,7 +1,7 @@
 """Grist integration for saving events to the ORB Events database."""
 import aiohttp
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from dataclasses import dataclass
 
@@ -59,7 +59,8 @@ def _event_to_grist_fields(event: Event) -> dict:
         "Tags": ", ".join(event.tags) if event.tags else None,
         "ImageURL": event.image_url,
         "ConfidenceScore": event.confidence_score,
-        "CreatedAt": datetime.utcnow().isoformat(),
+        # Use Pacific Time for CreatedAt (naive datetime, no tz conversion by Grist)
+        "CreatedAt": datetime.now(timezone(timedelta(hours=-8))).replace(tzinfo=None).isoformat(),
     }
 
     # Location fields
