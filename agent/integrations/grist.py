@@ -1,9 +1,12 @@
 """Grist integration for saving events to the ORB Events database."""
 import aiohttp
+import json
 import logging
+import urllib
+from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Optional
-from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 from agent.core.schemas import Event
 from agent.core.config import settings
@@ -25,10 +28,10 @@ class GristResult:
     success: bool
     record_id: Optional[int] = None
     record_url: Optional[str] = None
+    events: Optional[list] = field(default_factory=list)
     error: Optional[str] = None
 
-
-def _format_datetime(dt: Optional[datetime]) -> Optional[str]:
+def _format_datetime_input(dt: Optional[datetime]) -> Optional[str]:
     """
     Format datetime for Grist API.
 
@@ -39,9 +42,22 @@ def _format_datetime(dt: Optional[datetime]) -> Optional[str]:
         return None
     # Strip timezone to prevent Grist from converting to UTC
     # The datetime is already in the correct local time (Pacific)
+
     naive_dt = dt.replace(tzinfo=None)
     return naive_dt.isoformat()
 
+def _format_datetime_output(timestamp: Optional[str]) -> Optional[str]:
+    """
+    Reverse the transformation above, from Unix timestamp to Pacific time. Note that at present Grist is
+    internally storing the event time incorrectly (as a Unix timestamp, parsing the naive portion of Pacific
+    time as if it were UTC), but as long as we reverse the incorrect operation on the way out it should be
+    consistent.
+    """
+    if timestamp is None:
+        return None
+
+    dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+    return dt.replace(tzinfo=ZoneInfo('America/Los_Angeles')).isoformat()
 
 def _event_to_grist_fields(event: Event) -> dict:
     """
@@ -51,8 +67,8 @@ def _event_to_grist_fields(event: Event) -> dict:
     """
     fields = {
         "Title": event.title or "Unknown Event",
-        "StartDatetime": _format_datetime(event.start_datetime),
-        "EndDatetime": _format_datetime(event.end_datetime),
+        "StartDatetime": _format_datetime_input(event.start_datetime),
+        "EndDatetime": _format_datetime_input(event.end_datetime),
         "Description": event.description,
         "SourceURL": event.source_url,
         "Price": event.price,
@@ -76,6 +92,118 @@ def _event_to_grist_fields(event: Event) -> dict:
 
     # Remove None values (Grist doesn't like them)
     return {k: v for k, v in fields.items() if v is not None}
+
+
+def _grist_record_to_event(record: dict) -> Event:
+    """
+    Convert Grist record to Event object.
+
+    Maps Grist Events table columns to our Event schema.
+    """
+    event = record.get('fields', {})
+
+    location = {
+        'venue': event.get('Venue'),
+        'address': event.get('Address'),
+        'city': event.get('City'),
+    }
+
+    if event.get('LocationType'):
+        location['type'] = event['LocationType']
+
+    properties = {
+        'title': event.get('Title') or 'Untitled Event',
+        'description': event.get('Description') or '',
+        'start_datetime': _format_datetime_output(event.get('StartDatetime')),
+        'end_datetime': _format_datetime_output(event.get('StartDatetime')),
+        'timezone': 'America/Los_Angeles',
+        'location': location,
+        'source_url': event.get('SourceURL'),
+        'price': event.get('Price'),
+        'tags': list(filter(None, event.get('Tags', '').split(', '))),
+        'image_url': event.get('ImageURL'),
+        'confidence_score': event.get('ConfidenceScore'),
+    }
+
+    if event.get('OrganizerName'):
+        properties['organizer'] = {
+            'name': event['OrganizerName'],
+        }
+
+    return Event(**properties)
+
+
+async def fetch_events_from_grist(
+    start: datetime,
+    end: datetime,
+    api_key: Optional[str] = None,
+    doc_id: Optional[str] = None,
+    timeout: float = 15.0,
+) -> GristResult:
+    """
+    Read events from the Grist Events table.
+
+    Args:
+        start: Lower limit for event start time
+        end: Upper limit for event start time
+        api_key: Grist API key (defaults to settings)
+        doc_id: Grist document ID (defaults to ORB Events doc)
+        timeout: Request timeout in seconds
+
+    Returns:
+        GristResult with an array of Event objects
+    """
+    api_key = api_key or getattr(settings, 'grist_api_key', None)
+    doc_id = doc_id or GRIST_DOC_ID
+
+    if not api_key:
+        logger.error("No Grist API key configured")
+        return GristResult(
+            success=False,
+            error="Grist API key not configured"
+        )
+
+    url = f"{GRIST_API_BASE}/docs/{doc_id}/sql"
+    sql = f"select * from Events where StartDatetime >= ? and StartDatetime <= ? order by StartDatetime"
+    payload = {
+        'sql': sql,
+        'args': [start.timestamp(), end.timestamp()],
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=timeout)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    records = data.get("records", [])
+                    return GristResult(
+                        success=True,
+                        events=[_grist_record_to_event(record) for record in records],
+                    )
+                else:
+                    body = await response.text()
+                    logger.error(
+                        f"Grist API error: status={response.status}, body={body}"
+                    )
+                    return GristResult(
+                        success=False,
+                        error=f"Grist API returned {response.status}: {body}"
+                    )
+
+    except aiohttp.ClientError as e:
+        logger.error(f"Grist connection error: {e}")
+        return GristResult(success=False, error=f"Connection error: {e}")
+    except Exception as e:
+        logger.error(f"Unexpected Grist error: {e}")
+        return GristResult(success=False, error=f"Unexpected error: {e}")
 
 
 async def save_event_to_grist(

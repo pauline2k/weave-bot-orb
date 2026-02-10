@@ -1,15 +1,47 @@
 """FastAPI route definitions."""
+from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException
 from agent.core.schemas import (
+    Event,
     ScrapeRequest,
     ScrapeResponse,
     ParseRequest,
     ParseResponse
 )
 from agent.core.tasks import task_runner, ParseTask
+from agent.integrations.grist import fetch_events_from_grist
 from agent.scraper.orchestrator import ScrapingOrchestrator
 
 router = APIRouter()
+
+
+@router.get("/calendar", response_model=list[Event])
+async def get_calendar(start_date: str) -> list[Event]:
+    """
+    Return calendar events for the requested week as a JSON array.
+
+    Args:
+        start_date: Monday to start the week.
+
+    Returns:
+        List of events
+    """
+
+    try:
+        start = datetime.strptime(start_date, '%Y-%m-%d')
+        end = start + timedelta(days=7)
+
+        response = await fetch_events_from_grist(
+            start=start,
+            end=end,
+        )
+        return response.events
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
 
 
 @router.post("/scrape", response_model=ScrapeResponse)
