@@ -2,6 +2,10 @@
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pathlib import Path
+
 from agent.api.routes import router
 from agent.core.config import settings
 
@@ -31,9 +35,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routes (no version prefix - keep it simple for now)
-app.include_router(router, tags=["scraping"])
+# Include API routes (prefix so they don't collide with SPA routes)
+app.include_router(router, prefix="/api", tags=["scraping"])
 
+DIST_DIR = Path(__file__).resolve().parent / "dist"
+ASSETS_DIR = DIST_DIR / "assets"
+INDEX_FILE = DIST_DIR / "index.html"
+
+# Serve hashed assets (e.g., /assets/xxx.js)
+if ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
+
+# Serve other static files in dist (favicon, etc.)
+if DIST_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(DIST_DIR)), name="static")
+
+# SPA fallback: everything else returns index.html (except /api)
+@app.get("/{full_path:path}")
+def spa_fallback(full_path: str):
+    if full_path.startswith("api/"):
+        # Let FastAPI return 404 for unknown API routes
+        return {"detail": "Not Found"}
+    return FileResponse(str(INDEX_FILE))
 
 @app.on_event("startup")
 async def startup_event():
@@ -41,23 +64,10 @@ async def startup_event():
     logger.info("Starting Event Scraper API")
     logger.info(f"Server will run on {settings.host}:{settings.port}")
 
-
 @app.on_event("shutdown")
 async def shutdown_event():
     """Run on application shutdown."""
     logger.info("Shutting down Event Scraper API")
-
-
-@app.get("/")
-async def root():
-    """Root endpoint with API information."""
-    return {
-        "service": "Event Scraper API",
-        "version": "0.1.0",
-        "docs": "/docs",
-        "health": "/health"
-    }
-
 
 if __name__ == "__main__":
     import uvicorn

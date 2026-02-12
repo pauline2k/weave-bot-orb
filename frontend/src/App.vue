@@ -194,7 +194,7 @@ async function fetchCalendar(): Promise<void> {
   error.value = ''
 
   try {
-    const res = await fetch(`${apiBaseUrl}/calendar?start_date=${selectedMonday.value}`, {
+    const res = await fetch(`${apiBaseUrl}/api/calendar?start_date=${selectedMonday.value}`, {
       method: 'GET',
       headers: { Accept: 'application/json' }
     })

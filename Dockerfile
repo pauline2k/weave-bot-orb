@@ -1,4 +1,13 @@
-FROM python:3.11-slim
+# ---------- build frontend ----------
+FROM node:20-alpine AS frontend-build
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# ---------- build backend ----------
+FROM python:3.12-slim AS backend
 
 # Install system dependencies for Playwright
 RUN apt-get update && apt-get install -y \
@@ -28,15 +37,18 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy requirements first for better caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY agent/requirements.txt /app/agent/
+RUN pip install --no-cache-dir -r /app/agent/requirements.txt
 
 # Install Playwright browsers
 RUN playwright install chromium
 
 # Copy the application code into an 'agent' subdirectory
 # This way 'agent.main' import works correctly
-COPY . ./agent/
+COPY agent/ /app/agent/
+
+# Copy compiled frontend into backend folder
+COPY --from=frontend-build /app/frontend/dist /app/agent/dist
 
 # Expose port (Railway uses PORT env var)
 EXPOSE 8000
