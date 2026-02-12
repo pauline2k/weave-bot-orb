@@ -2,6 +2,8 @@
 .env
 *.env
 !.env.example
+# But not under the front end
+!frontend/.env
 
 # Python
 __pycache__/
@@ -24,6 +26,9 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# JS
+node_modules
 
 # Virtual environments
 .venv/
