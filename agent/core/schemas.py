@@ -11,6 +11,7 @@ class EventLocation(BaseModel):
     venue: Optional[str] = None
     address: Optional[str] = None
     city: Optional[str] = None
+    neighborhood: Optional[str] = None
     url: Optional[str] = None
 
 
@@ -19,6 +20,13 @@ class EventOrganizer(BaseModel):
     name: Optional[str] = None
     contact: Optional[str] = None
     url: Optional[str] = None
+
+
+class CalendarMetadata(BaseModel):
+    """Calendar-specific metadata for an event: is it deleted, incoming, supplemental?"""
+    deleted: Optional[bool] = False
+    incoming: Optional[bool] = False
+    supplemental: Optional[bool] = False
 
 
 class Event(BaseModel):
@@ -34,7 +42,8 @@ class Event(BaseModel):
     price: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     image_url: Optional[str] = None
-    source_url: Optional[str] = None  # The URL we scraped from (optional for image-only)
+    source_url: Optional[str] = None  # The URL we scraped from (optional for image-only),
+    source_url_provider: Optional[str] = None
     confidence_score: Optional[float] = Field(
         default=None,
         ge=0.0,
@@ -45,6 +54,8 @@ class Event(BaseModel):
         default=None,
         description="Any issues, warnings, or notes about the extraction"
     )
+    calendar_metadata: Optional[CalendarMetadata] = None
+    grist_record_id: Optional[int] = None
 
 
 class ScrapeRequest(BaseModel):
@@ -69,6 +80,10 @@ class ScrapeResponse(BaseModel):
         description="Additional metadata about the scraping process"
     )
 
+
+class UpdateResponse(BaseModel):
+    """Response from update operation."""
+    success: bool
 
 # --- Async parsing schemas (for Discord integration) ---
 

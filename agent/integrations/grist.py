@@ -71,6 +71,7 @@ def _event_to_grist_fields(event: Event) -> dict:
         "EndDatetime": _format_datetime_input(event.end_datetime),
         "Description": event.description,
         "SourceURL": event.source_url,
+        "Source_URL_Provider": event.source_url_provider,
         "Price": event.price,
         "Tags": ", ".join(event.tags) if event.tags else None,
         "ImageURL": event.image_url,
@@ -83,12 +84,19 @@ def _event_to_grist_fields(event: Event) -> dict:
     if event.location:
         fields["Venue"] = event.location.venue
         fields["Address"] = event.location.address
+        fields["Neighborhood"] = event.location.neighborhood
         fields["City"] = event.location.city
         fields["LocationType"] = event.location.type
 
     # Organizer
     if event.organizer:
         fields["OrganizerName"] = event.organizer.name
+
+    # Calendar metadata
+    if event.calendar_metadata:
+        fields["Deleted"] = event.calendar_metadata.deleted
+        fields["Incoming"] = event.calendar_metadata.incoming
+        fields["Supplemental"] = event.calendar_metadata.supplemental
 
     # Remove None values (Grist doesn't like them)
     return {k: v for k, v in fields.items() if v is not None}
@@ -105,6 +113,7 @@ def _grist_record_to_event(record: dict) -> Event:
     location = {
         'venue': event.get('Venue'),
         'address': event.get('Address'),
+        'neighborhood': event.get('Neighborhood'),
         'city': event.get('City'),
     }
 
@@ -119,10 +128,12 @@ def _grist_record_to_event(record: dict) -> Event:
         'timezone': 'America/Los_Angeles',
         'location': location,
         'source_url': event.get('SourceURL'),
+        'source_url_provider': event.get('Source_URL_Provider'),
         'price': event.get('Price'),
         'tags': list(filter(None, event.get('Tags', '').split(', '))),
         'image_url': event.get('ImageURL'),
         'confidence_score': event.get('ConfidenceScore'),
+        'grist_record_id': event.get('id'),
     }
 
     if event.get('OrganizerName'):
@@ -298,3 +309,73 @@ async def save_event_to_grist(
     except Exception as e:
         logger.error(f"Unexpected Grist error: {e}")
         return GristResult(success=False, error=f"Unexpected error: {e}")
+
+
+async def update_grist_event(
+    event_id: int,
+    event: Event,
+    api_key: Optional[str] = None,
+    doc_id: Optional[str] = None,
+    timeout: float = 15.0
+) -> bool:
+    """
+    Update a specific record in grist.
+
+    Args:
+        event: update event fields
+
+    Returns:
+        True if successful, False otherwise
+    """
+    api_key = api_key or getattr(settings, 'grist_api_key', None)
+    doc_id = doc_id or GRIST_DOC_ID
+
+    if not api_key:
+        logger.error("No Grist API key configured")
+        return GristResult(
+            success=False,
+            error="Grist API key not configured"
+        )
+
+    url = f"{GRIST_API_BASE}/docs/{doc_id}/tables/{GRIST_TABLE}/records"
+
+    fields = _event_to_grist_fields(event)
+    payload = {
+        "records": [
+            {
+                "id": event_id,
+                "fields": fields
+            }
+        ]
+    }
+
+    logger.info(f"Updating Grist event id {event_id}: {event.title}")
+    logger.debug(f"Grist payload: {payload}")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.patch(
+                url,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=aiohttp.ClientTimeout(total=timeout)
+            ) as response:
+                if response.status == 200:
+                    return True
+                else:
+                    body = await response.text()
+                    logger.error(
+                        f"Grist API error updating event: "
+                        f"status={response.status}, body={body}"
+                    )
+                    return False
+
+    except aiohttp.ClientError as e:
+        logger.error(f"Grist connection error: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error updating Grist: {e}")
+        return False

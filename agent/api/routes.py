@@ -6,10 +6,11 @@ from agent.core.schemas import (
     ScrapeRequest,
     ScrapeResponse,
     ParseRequest,
-    ParseResponse
+    ParseResponse,
+    UpdateResponse
 )
 from agent.core.tasks import task_runner, ParseTask
-from agent.integrations.grist import fetch_events_from_grist
+from agent.integrations.grist import fetch_events_from_grist, update_grist_event
 from agent.scraper.orchestrator import ScrapingOrchestrator
 
 router = APIRouter()
@@ -36,6 +37,33 @@ async def get_calendar(start_date: str) -> list[Event]:
             end=end,
         )
         return response.events
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+@router.post("/calendar/update/{event_id}", response_model=UpdateResponse)
+async def update_calendar_event(event_id: int, event: Event) -> UpdateResponse:
+    """
+    Update  events for the requested week as a JSON array.
+
+    Args:
+        event_id: Event id to update.
+        event: Event to update.
+
+    Returns:
+        List of events
+    """
+
+    try:
+        success = await update_grist_event(
+            event_id=event_id,
+            event=event,
+        )
+        return UpdateResponse(success=success)
 
     except Exception as e:
         raise HTTPException(

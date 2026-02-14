@@ -17,6 +17,10 @@
         {{ loading ? "Loading…" : "Reload" }}
       </button>
       <span v-if="lastUpdated" class="meta">Last updated: {{ lastUpdated }}</span>
+      <label class="checkboxLabel">
+        <input type="checkbox" v-model="allowEdits" />
+        <span>Allow edits</span>
+      </label>
     </section>
 
     <section v-if="error" class="error">
@@ -31,16 +35,85 @@
         <p>
           <strong><u>{{ formatDisplayDate(date) }}</u></strong>
         </p>
-        <p v-for="event in events">
-          <strong>
-            {{event.title}}
-          </strong>,
-          {{ formatTime12h(event.start_datetime) }},
-          {{ event.location?.venue }}
-          ({{ event.location?.city || 'Oakland'}}).
-          {{ event.description }}
-          [<a :href="event.source_url">{{event.organizer?.name || event.source_url}}</a>]
-        </p>
+        <div v-for="event in events">
+          <p v-if="event.grist_record_id !== currentEditEventId">
+            <strong>
+              {{event.title}}
+            </strong>,
+            {{ formatTime12h(event.start_datetime) }},
+            {{ event.location?.venue }}
+            ({{ event.location?.neighborhood || event.location?.city || 'Oakland'}}).
+            {{ event.description }}
+            [<a :href="event.source_url || undefined">{{event.source_url_provider || event.organizer?.name || event.source_url}}</a>]
+            <button
+              v-if="allowEdits && !currentEditEventId"
+              class="btn"
+              type="button"
+              @click="setCurrentEditEvent(event)"
+            >
+              Edit event
+            </button>
+          </p>
+          <section class="panel formPanel" v-if="event.grist_record_id === currentEditEventId">
+            <form class="form" @submit.prevent="submitEditedItem">
+              <label class="field">
+                <span class="fieldLabel">Title</span>
+                <input class="input" type="text" v-model="editedItemTitle" />
+              </label>
+
+              <label class="field">
+                <span class="fieldLabel">Date/Time</span>
+                <input
+                  class="input"
+                  type="datetime-local"
+                  v-model="editedItemStartDatetime"
+                  required
+                />
+              </label>
+
+              <label class="field">
+                <span class="fieldLabel">Venue</span>
+                <input class="input" type="text" v-model="editedItemVenue" />
+              </label>
+
+              <label class="field">
+                <span class="fieldLabel">City/Neighborhood</span>
+                <input class="input" type="text" v-model="editedItemNeighborhood" />
+              </label>
+
+              <label class="field">
+                <span class="fieldLabel">Description</span>
+                <textarea
+                  class="textarea"
+                  v-model="editedItemDescription"
+                  rows="8"
+                />
+              </label>
+
+              <label class="field">
+                <span class="fieldLabel">URL</span>
+                <input class="input" type="text" v-model="editedItemSourceUrl" />
+              </label>
+
+              <label class="field">
+                <span class="fieldLabel">URL Provider</span>
+                <input class="input" type="text" v-model="editedItemSourceUrlProvider" />
+              </label>
+
+              <div class="formActions">
+                <button class="btn" type="submit" :disabled="updating">
+                  {{ updating ? "Saving…" : "Update" }}
+                </button>
+                <button class="btn" type="button" :disabled="updating" @click="onCancelUpdate">
+                  Cancel
+                </button>
+
+                <span v-if="updateOk" class="ok">Updated.</span>
+                <span v-if="updateError" class="errorInline">Error: {{ updateError }}</span>
+              </div>
+            </form>
+          </section>
+        </div>
       </div>
     </section>
   </main>
@@ -50,8 +123,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 
 type CalendarLocation = {
-  city?: string,
-  venue?: string,
+  city?: string | null,
+  venue?: string | null,
+  neighborhood?: string | null,
   [key: string]: unknown
 }
 
@@ -61,16 +135,19 @@ type CalendarOrganizer = {
 
 type CalendarEvent = {
   start_datetime: string // ISO 8601 datetime,
-  source_url?: string,
+  grist_record_id?: number,
+  description?: string | null,
+  title: string | null,
+  source_url?: string | null,
+  source_url_provider?: string | null,
   location?: CalendarLocation,
   organizer?: CalendarOrganizer,
   // Other properties exist but are not relevant here.
   [key: string]: unknown
 }
 
-
-
 const loading = ref<boolean>(false)
+const allowEdits = ref<boolean>(false)
 const error = ref<string>('')
 const payload = ref<CalendarEvent[]>([])
 const lastUpdated = ref<string>('')
@@ -214,6 +291,107 @@ async function fetchCalendar(): Promise<void> {
   }
 }
 
+const currentEditEventId = ref<number | null>(null)
+
+const updating = ref<boolean>(false);
+const updateError = ref<string | null>(null);
+const updateOk = ref<boolean>(false);
+
+const editedItemTitle = ref<string | null>(null);
+const editedItemStartDatetime = ref<string | null>(null);
+const editedItemVenue = ref<string | null>(null);
+const editedItemNeighborhood = ref<string | null>(null);
+const editedItemDescription = ref<string | null>(null);
+const editedItemSourceUrl = ref<string | null>(null);
+const editedItemSourceUrlProvider = ref<string | null>(null);
+
+function extractIsoTimezone(iso: string): string | null {
+  const m = iso.match(/(Z|[+-]\d{2}:\d{2})$/);
+  return m ? m[1] : null;
+}
+
+async function submitEditedItem(): Promise<void> {
+  updating.value = true;
+  updateError.value = '';
+  updateOk.value = false;
+
+  const currentEvent = payload.value.find(event => event.grist_record_id === currentEditEventId.value)
+  if (!currentEvent) {
+    updating.value = false
+    return
+  }
+
+  try {
+    const body: CalendarEvent = {
+      title: editedItemTitle.value || null,
+      start_datetime: editedItemStartDatetime.value || '' + extractIsoTimezone(currentEvent.start_datetime),
+      description: editedItemDescription.value || null,
+      source_url: editedItemSourceUrl.value || null,
+      source_url_provider: editedItemSourceUrlProvider.value || null,
+      location: {
+        venue: editedItemVenue.value || null,
+        neighborhood: editedItemNeighborhood.value || null
+      }
+    };
+
+    const res = await fetch(`${apiBaseUrl}/api/calendar/update/${currentEditEventId.value}`, {
+      method: 'POST',
+      headers: {
+        "Content-Type": "application/json",
+        Accept: 'application/json'
+      },
+      body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` — ${text}` : ""}`);
+    }
+
+    resetUpdateForm()
+    currentEditEventId.value = null
+    await fetchCalendar()
+    lastUpdated.value = new Date().toLocaleString()
+
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e)
+    payload.value = []
+
+  } finally {
+    updating.value = false
+  }
+}
+
+function setCurrentEditEvent(event: CalendarEvent): void {
+  currentEditEventId.value = event.grist_record_id || null
+  editedItemTitle.value = event.title || null
+  editedItemStartDatetime.value = event.start_datetime.slice(0, 16) || null
+  editedItemVenue.value = event.location?.venue || null
+  editedItemNeighborhood.value = (event.location && (event.location.neighborhood || event.location.city)) || 'Oakland'
+  editedItemDescription.value = event.description || null
+  editedItemSourceUrl.value = event.source_url || null
+  editedItemSourceUrlProvider.value = event.source_url_provider || event.organizer?.name || event.source_url || null
+  updateError.value = null
+  updateOk.value = false
+}
+
+function resetUpdateForm(): void {
+  editedItemTitle.value = null;
+  editedItemStartDatetime.value = null;
+  editedItemVenue.value = null;
+  editedItemNeighborhood.value = null;
+  editedItemDescription.value = null;
+  editedItemSourceUrl.value = null;
+  editedItemSourceUrlProvider.value = null;
+  updateError.value = null;
+  updateOk.value = false;
+}
+
+function onCancelUpdate(): void {
+  resetUpdateForm
+  currentEditEventId.value = null
+}
+
 const groupedByDate = computed<Record<string, CalendarEvent[]>>(() => {
   const items = payload.value ?? []
   const out: Record<string, CalendarEvent[]> = {}
@@ -316,6 +494,7 @@ body {
   border-radius: 10px;
   background: transparent;
   cursor: pointer;
+  display: block;
 }
 
 .btn:disabled {
@@ -348,5 +527,78 @@ body {
   overflow: auto;
   min-height: 220px;
   font-size: 13px;
+}
+
+.formPanel {
+  margin-top: 16px;
+  padding: 14px;
+}
+
+.formHeader {
+  margin-bottom: 10px;
+}
+
+.h2 {
+  margin: 0 0 6px 0;
+  font-size: 18px;
+}
+
+.muted {
+  margin: 0;
+  opacity: 0.75;
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.fieldLabel {
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+.input,
+.textarea,
+.select {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.help {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.formActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ok {
+  opacity: 0.85;
+}
+
+.checkboxLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.errorInline {
+  color: inherit;
+  opacity: 0.9;
 }
 </style>
