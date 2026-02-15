@@ -4,7 +4,30 @@
       <h1>🔮 Oakland Review of Books calendar of (not just) literary events</h1>
     </header>
 
-    <section class="controls">
+    <section class="panel loginPanel" v-if="!isLoggedIn">
+      <h2 class="h2">Login</h2>
+
+      <form class="form" @submit.prevent="submitLogin">
+        <label class="field">
+          <span class="fieldLabel">Username</span>
+          <input class="input" v-model="loginUser" required />
+        </label>
+
+        <label class="field">
+          <span class="fieldLabel">Password</span>
+          <input class="input" type="password" v-model="loginPass" required />
+        </label>
+
+        <div class="formActions">
+          <button class="btn" :disabled="loggingIn">
+            {{ loggingIn ? "Signing in…" : "Login" }}
+          </button>
+          <span v-if="loginError" class="errorInline">{{ loginError }}</span>
+        </div>
+      </form>
+    </section>
+
+    <section class="controls" v-if="isLoggedIn">
       <label class="label">
         <span>Week of:</span>
         <select class="select" v-model="selectedMonday">
@@ -27,7 +50,7 @@
       <strong>Error:</strong> {{ error }}
     </section>
 
-    <section class="panel">
+    <section class="panel" v-if="isLoggedIn">
       <div v-if="Object.keys(groupedByDate).length === 0" class="empty">
         No data yet.
       </div>
@@ -44,7 +67,7 @@
             {{ event.location?.venue }}
             ({{ event.location?.neighborhood || event.location?.city || 'Oakland'}}).
             {{ event.description }}
-            [<a :href="event.source_url || undefined">{{event.source_url_provider || event.organizer?.name || event.source_url}}</a>]
+            [<a :href="event.source_url">{{event.source_url_provider || event.organizer?.name || event.source_url}}</a>]
             <button
               v-if="allowEdits && !currentEditEventId"
               class="btn"
@@ -138,13 +161,19 @@ type CalendarEvent = {
   grist_record_id?: number,
   description?: string | null,
   title: string | null,
-  source_url?: string | null,
+  source_url?: string,
   source_url_provider?: string | null,
   location?: CalendarLocation,
   organizer?: CalendarOrganizer,
   // Other properties exist but are not relevant here.
   [key: string]: unknown
 }
+
+const loginUser = ref("");
+const loginPass = ref("");
+const loginError = ref("");
+const loggingIn = ref(false);
+const isLoggedIn = ref(false);
 
 const loading = ref<boolean>(false)
 const allowEdits = ref<boolean>(false)
@@ -264,16 +293,48 @@ function pickInitialMonday(): string {
   return options.includes(fallback) ? fallback : (options[0] ?? fallback);
 }
 
-const apiBaseUrl = import.meta.env.VITE_APP_API_BASE_URL
+async function submitLogin(): Promise<void> {
+  loggingIn.value = true;
+  loginError.value = "";
+
+  try {
+    const basic = btoa(`${loginUser.value}:${loginPass.value}`);
+
+    const res = await fetch('/api/login', {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${basic}`,
+        Accept: "application/json"
+      },
+      credentials: "include"
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Login failed: ${res.status}${text ? ` — ${text}` : ""}`);
+    }
+
+    isLoggedIn.value = true;
+
+    // Immediately refresh your calendar data
+    await initialize();
+
+  } catch (e: unknown) {
+    loginError.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    loggingIn.value = false;
+  }
+}
 
 async function fetchCalendar(): Promise<void> {
   loading.value = true
   error.value = ''
 
   try {
-    const res = await fetch(`${apiBaseUrl}/api/calendar?start_date=${selectedMonday.value}`, {
+    const res = await fetch(`/api/calendar?start_date=${selectedMonday.value}`, {
       method: 'GET',
-      headers: { Accept: 'application/json' }
+      headers: { Accept: 'application/json' },
+      credentials: "include"
     })
 
     if (!res.ok) {
@@ -302,7 +363,7 @@ const editedItemStartDatetime = ref<string | null>(null);
 const editedItemVenue = ref<string | null>(null);
 const editedItemNeighborhood = ref<string | null>(null);
 const editedItemDescription = ref<string | null>(null);
-const editedItemSourceUrl = ref<string | null>(null);
+const editedItemSourceUrl = ref<string | undefined>(undefined);
 const editedItemSourceUrlProvider = ref<string | null>(null);
 
 function extractIsoTimezone(iso: string): string | null {
@@ -326,7 +387,7 @@ async function submitEditedItem(): Promise<void> {
       title: editedItemTitle.value || null,
       start_datetime: editedItemStartDatetime.value || '' + extractIsoTimezone(currentEvent.start_datetime),
       description: editedItemDescription.value || null,
-      source_url: editedItemSourceUrl.value || null,
+      source_url: editedItemSourceUrl.value,
       source_url_provider: editedItemSourceUrlProvider.value || null,
       location: {
         venue: editedItemVenue.value || null,
@@ -334,11 +395,12 @@ async function submitEditedItem(): Promise<void> {
       }
     };
 
-    const res = await fetch(`${apiBaseUrl}/api/calendar/update/${currentEditEventId.value}`, {
+    const res = await fetch(`/api/calendar/update/${currentEditEventId.value}`, {
       method: 'POST',
       headers: {
         "Content-Type": "application/json",
-        Accept: 'application/json'
+        Accept: 'application/json',
+        credentials: "include"
       },
       body: JSON.stringify(body),
     })
@@ -369,7 +431,7 @@ function setCurrentEditEvent(event: CalendarEvent): void {
   editedItemVenue.value = event.location?.venue || null
   editedItemNeighborhood.value = (event.location && (event.location.neighborhood || event.location.city)) || 'Oakland'
   editedItemDescription.value = event.description || null
-  editedItemSourceUrl.value = event.source_url || null
+  editedItemSourceUrl.value = event.source_url
   editedItemSourceUrlProvider.value = event.source_url_provider || event.organizer?.name || event.source_url || null
   updateError.value = null
   updateOk.value = false
@@ -381,7 +443,7 @@ function resetUpdateForm(): void {
   editedItemVenue.value = null;
   editedItemNeighborhood.value = null;
   editedItemDescription.value = null;
-  editedItemSourceUrl.value = null;
+  editedItemSourceUrl.value = undefined;
   editedItemSourceUrlProvider.value = null;
   updateError.value = null;
   updateOk.value = false;
@@ -409,12 +471,30 @@ const groupedByDate = computed<Record<string, CalendarEvent[]>>(() => {
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => a.localeCompare(b)));
 })
 
-onMounted(() => {
+async function initialize(): Promise<void> {
   // Initialize from URL (if present), otherwise default to next upcoming Monday.
   selectedMonday.value = pickInitialMonday();
   // Ensure URL reflects the initialized selection.
   setStartDateInUrl(selectedMonday.value);
-  void fetchCalendar();
+  await fetchCalendar();
+}
+
+async function checkSession(): Promise<void> {
+  try {
+    const res = await fetch('/api/me', {
+      credentials: "include"
+    });
+    if (res.ok) {
+      isLoggedIn.value = true
+      await initialize()
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+onMounted(() => {
+  checkSession()
 })
 
 // Auto-fetch whenever the week changes

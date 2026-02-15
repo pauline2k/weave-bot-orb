@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "info"
 
+    # Authentication
+    auth_user: str = ""
+    auth_password: str = ""
+    session_secret: str = ""
+    cookie_https_only: bool = False
+
     # Browser
     headless: bool = True
     browser_timeout: int = 30000  # milliseconds

@@ -1,6 +1,10 @@
 """FastAPI route definitions."""
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException
+import secrets
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
+from agent.core.config import settings
 from agent.core.schemas import (
     Event,
     ScrapeRequest,
@@ -14,9 +18,41 @@ from agent.integrations.grist import fetch_events_from_grist, update_grist_event
 from agent.scraper.orchestrator import ScrapingOrchestrator
 
 router = APIRouter()
+security = HTTPBasic()
 
 
-@router.get("/calendar", response_model=list[Event])
+def require_session(request: Request):
+    if not request.session.get("user"):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+
+@router.post("/login")
+def login(request: Request, creds: HTTPBasicCredentials = Depends(security)):
+    user_ok = secrets.compare_digest(creds.username, settings.auth_user)
+    pass_ok = secrets.compare_digest(creds.password, settings.auth_password)
+    if not (user_ok and pass_ok):
+        # Basic-auth style failure
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid credentials",
+        )
+
+    request.session["user"] = creds.username
+    return {"ok": True, "user": creds.username}
+
+
+@router.post("/logout")
+def logout(request: Request):
+    request.session.clear()
+    return {"ok": True}
+
+
+@router.get("/me", dependencies=[Depends(require_session)])
+def me(request: Request):
+    return {"user": request.session.get("user")}
+
+
+@router.get("/calendar", dependencies=[Depends(require_session)], response_model=list[Event])
 async def get_calendar(start_date: str) -> list[Event]:
     """
     Return calendar events for the requested week as a JSON array.
@@ -45,7 +81,7 @@ async def get_calendar(start_date: str) -> list[Event]:
         )
 
 
-@router.post("/calendar/update/{event_id}", response_model=UpdateResponse)
+@router.post("/calendar/update/{event_id}", dependencies=[Depends(require_session)], response_model=UpdateResponse)
 async def update_calendar_event(event_id: int, event: Event) -> UpdateResponse:
     """
     Update  events for the requested week as a JSON array.

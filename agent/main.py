@@ -1,10 +1,12 @@
 """Main FastAPI application."""
 import logging
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
+from starlette.middleware.sessions import SessionMiddleware
 
 from agent.api.routes import router
 from agent.core.config import settings
@@ -33,6 +35,14 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.environ.get(settings.session_secret),
+    session_cookie="session",
+    https_only=settings.cookie_https_only,  # set true in prod if HTTPS-only
+    same_site="lax",
 )
 
 # Include API routes (prefix so they don't collide with SPA routes)

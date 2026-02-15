@@ -8,6 +8,13 @@ export default defineConfig({
     assetsDir: "assets"
   },
   server: {
-    port: 8080
+    port: 8080,
+    proxy: {
+      // any request starting with /api goes to the backend
+      "/api": {
+        target: "http://localhost:8000",
+        changeOrigin: true
+      }
+    }
   }
 })
