@@ -23,8 +23,9 @@ class EventOrganizer(BaseModel):
 
 
 class CalendarMetadata(BaseModel):
-    """Calendar-specific metadata for an event: is it deleted, incoming, supplemental?"""
+    """Calendar-specific metadata for an event: is it deleted, done, incoming, supplemental?"""
     deleted: Optional[bool] = False
+    done: Optional[bool] = False
     incoming: Optional[bool] = False
     supplemental: Optional[bool] = False
 

@@ -95,6 +95,7 @@ def _event_to_grist_fields(event: Event) -> dict:
     # Calendar metadata
     if event.calendar_metadata:
         fields["Deleted"] = event.calendar_metadata.deleted
+        fields["Done"] = event.calendar_metadata.done
         fields["Incoming"] = event.calendar_metadata.incoming
         fields["Supplemental"] = event.calendar_metadata.supplemental
 
@@ -120,6 +121,13 @@ def _grist_record_to_event(record: dict) -> Event:
     if event.get('LocationType'):
         location['type'] = event['LocationType']
 
+    calendar_metadata = {
+        'deleted': event.get('Deleted') or False,
+        'done': event.get('Done') or False,
+        'incoming': event.get('Incoming') or False,
+        'supplemental': event.get('Supplemental') or False,
+    }
+
     properties = {
         'title': event.get('Title') or 'Untitled Event',
         'description': event.get('Description') or '',
@@ -133,6 +141,7 @@ def _grist_record_to_event(record: dict) -> Event:
         'tags': list(filter(None, event.get('Tags', '').split(', '))),
         'image_url': event.get('ImageURL'),
         'confidence_score': event.get('ConfidenceScore'),
+        'calendar_metadata': calendar_metadata,
         'grist_record_id': event.get('id'),
     }
 

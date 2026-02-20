@@ -51,15 +51,18 @@
     </section>
 
     <section class="panel" v-if="isLoggedIn">
-      <div v-if="Object.keys(groupedByDate).length === 0" class="empty">
+      <div v-if="Object.keys(groupedByDateAndSupplemental).length === 0" class="empty">
         No data yet.
       </div>
-      <div v-for="(events, date) in groupedByDate" :key="date" class="day">
+      <div v-for="(events, date) in groupedByDateAndSupplemental" :key="date" class="day">
         <p>
           <strong><u>{{ formatDisplayDate(date) }}</u></strong>
         </p>
-        <div v-for="event in events">
-          <p v-if="event.grist_record_id !== currentEditEventId">
+        <div v-for="event in events['false']">
+          <p
+            :class="{'text-not-done': !event.calendar_metadata?.done, 'text-done': event.calendar_metadata?.done}"
+            v-if="event.grist_record_id !== currentEditEventId"
+          >
             <strong>
               {{event.title}}
             </strong>,
@@ -123,6 +126,16 @@
                 <input class="input" type="text" v-model="editedItemSourceUrlProvider" />
               </label>
 
+              <label class="checkboxLabel">
+                <input type="checkbox" v-model="editedItemMetadataSupplemental" />
+                <span>Mark as "Also"</span>
+              </label>
+
+              <label class="checkboxLabel">
+                <input type="checkbox" v-model="editedItemMetadataDone" />
+                <span>Mark as done</span>
+              </label>
+
               <div class="formActions">
                 <button class="btn" type="submit" :disabled="updating">
                   {{ updating ? "Saving…" : "Update" }}
@@ -136,6 +149,94 @@
               </div>
             </form>
           </section>
+        </div>
+
+        <div v-if="events['true']?.length">
+          <strong>Also: </strong>
+          <span
+            v-for="(event, index) in events['true']"
+            :class="{'text-not-done': !event.calendar_metadata?.done, 'text-done': event.calendar_metadata?.done}"
+          >
+            <a :href="event.source_url">{{ event.title }}</a> at {{ event.location?.venue }} ({{ event.location?.neighborhood }})
+            <button
+              v-if="allowEdits && !currentEditEventId"
+              type="button"
+              class="btn btn-inline"
+              @click="setCurrentEditEvent(event)"
+            >
+              Edit event
+            </button>
+            <span v-if="index !== events['true'].length - 1">/ </span>
+            <section class="panel formPanel" v-if="event.grist_record_id === currentEditEventId">
+              <form class="form" @submit.prevent="submitEditedItem">
+                <label class="field">
+                  <span class="fieldLabel">Title</span>
+                  <input class="input" type="text" v-model="editedItemTitle" />
+                </label>
+
+                <label class="field">
+                  <span class="fieldLabel">Date/Time</span>
+                  <input
+                    class="input"
+                    type="datetime-local"
+                    v-model="editedItemStartDatetime"
+                    required
+                  />
+                </label>
+
+                <label class="field">
+                  <span class="fieldLabel">Venue</span>
+                  <input class="input" type="text" v-model="editedItemVenue" />
+                </label>
+
+                <label class="field">
+                  <span class="fieldLabel">City/Neighborhood</span>
+                  <input class="input" type="text" v-model="editedItemNeighborhood" />
+                </label>
+
+                <label class="field">
+                  <span class="fieldLabel">Description</span>
+                  <textarea
+                    class="textarea"
+                    v-model="editedItemDescription"
+                    rows="8"
+                  />
+                </label>
+
+                <label class="field">
+                  <span class="fieldLabel">URL</span>
+                  <input class="input" type="text" v-model="editedItemSourceUrl" />
+                </label>
+
+                <label class="field">
+                  <span class="fieldLabel">URL Provider</span>
+                  <input class="input" type="text" v-model="editedItemSourceUrlProvider" />
+                </label>
+
+                <label class="checkboxLabel">
+                  <input type="checkbox" v-model="editedItemMetadataSupplemental" />
+                  <span>Mark as "Also"</span>
+                </label>
+
+                <label class="checkboxLabel">
+                  <input type="checkbox" v-model="editedItemMetadataDone" />
+                  <span>Mark as done</span>
+                </label>
+
+                <div class="formActions">
+                  <button class="btn" type="submit" :disabled="updating">
+                    {{ updating ? "Saving…" : "Update" }}
+                  </button>
+                  <button class="btn" type="button" :disabled="updating" @click="onCancelUpdate">
+                    Cancel
+                  </button>
+
+                  <span v-if="updateOk" class="ok">Updated.</span>
+                  <span v-if="updateError" class="errorInline">Error: {{ updateError }}</span>
+                </div>
+              </form>
+            </section>
+          </span>
         </div>
       </div>
     </section>
@@ -152,6 +253,13 @@ type CalendarLocation = {
   [key: string]: unknown
 }
 
+type CalendarMetadata = {
+  deleted?: boolean,
+  done?: boolean,
+  incoming?: boolean,
+  supplemental?: boolean
+}
+
 type CalendarOrganizer = {
   name?: string,
 }
@@ -165,6 +273,7 @@ type CalendarEvent = {
   source_url_provider?: string | null,
   location?: CalendarLocation,
   organizer?: CalendarOrganizer,
+  calendar_metadata?: CalendarMetadata,
   // Other properties exist but are not relevant here.
   [key: string]: unknown
 }
@@ -365,6 +474,10 @@ const editedItemNeighborhood = ref<string | null>(null);
 const editedItemDescription = ref<string | null>(null);
 const editedItemSourceUrl = ref<string | undefined>(undefined);
 const editedItemSourceUrlProvider = ref<string | null>(null);
+const editedItemMetadataDeleted = ref<boolean>(false);
+const editedItemMetadataDone = ref<boolean>(false);
+const editedItemMetadataIncoming = ref<boolean>(false);
+const editedItemMetadataSupplemental = ref<boolean>(false);
 
 function extractIsoTimezone(iso: string): string | null {
   const m = iso.match(/(Z|[+-]\d{2}:\d{2})$/);
@@ -392,6 +505,12 @@ async function submitEditedItem(): Promise<void> {
       location: {
         venue: editedItemVenue.value || null,
         neighborhood: editedItemNeighborhood.value || null
+      },
+      calendar_metadata: {
+        deleted: editedItemMetadataDeleted.value || false,
+        done: editedItemMetadataDone.value || false,
+        incoming: editedItemMetadataIncoming.value || false,
+        supplemental: editedItemMetadataSupplemental.value || false,
       }
     };
 
@@ -433,6 +552,10 @@ function setCurrentEditEvent(event: CalendarEvent): void {
   editedItemDescription.value = event.description || null
   editedItemSourceUrl.value = event.source_url
   editedItemSourceUrlProvider.value = event.source_url_provider || event.organizer?.name || event.source_url || null
+  editedItemMetadataDeleted.value = event.calendar_metadata?.deleted || false;
+  editedItemMetadataDone.value = event.calendar_metadata?.done || false;
+  editedItemMetadataIncoming.value = event.calendar_metadata?.incoming || false;
+  editedItemMetadataSupplemental.value = event.calendar_metadata?.supplemental || false;
   updateError.value = null
   updateOk.value = false
 }
@@ -445,6 +568,10 @@ function resetUpdateForm(): void {
   editedItemDescription.value = null;
   editedItemSourceUrl.value = undefined;
   editedItemSourceUrlProvider.value = null;
+  editedItemMetadataDeleted.value = false;
+  editedItemMetadataDone.value = false;
+  editedItemMetadataIncoming.value = false;
+  editedItemMetadataSupplemental.value = false;
   updateError.value = null;
   updateOk.value = false;
 }
@@ -454,17 +581,18 @@ function onCancelUpdate(): void {
   currentEditEventId.value = null
 }
 
-const groupedByDate = computed<Record<string, CalendarEvent[]>>(() => {
+const groupedByDateAndSupplemental = computed<Record<string, Record<`${boolean}`, CalendarEvent[]>>>(() => {
   const items = payload.value ?? []
-  const out: Record<string, CalendarEvent[]> = {}
+  const out: Record<string, Record<`${boolean}`, CalendarEvent[]>> = {}
 
   for (const item of items) {
     const iso = item?.start_datetime;
     if (typeof iso !== 'string') continue;
     // Date portion of ISO 8601: "YYYY-MM-DD"
     const dateKey = iso.slice(0, 10)
-    if (!out[dateKey]) out[dateKey] = []
-    out[dateKey].push(item)
+    const supplementalKey: boolean = item?.calendar_metadata?.supplemental || false
+    if (!out[dateKey]) out[dateKey] = {true: [], false: []}
+    out[dateKey][`${supplementalKey}`].push(item)
   }
 
   // Stable ordering by date key
@@ -577,6 +705,12 @@ body {
   display: block;
 }
 
+.btn-inline {
+  display: inline;
+  margin-right: 5px;
+  padding: 4px;
+}
+
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -680,5 +814,13 @@ body {
 .errorInline {
   color: inherit;
   opacity: 0.9;
+}
+
+.text-done {
+  color: #000;
+}
+
+.text-not-done {
+  color: #888;
 }
 </style>
