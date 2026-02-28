@@ -69,11 +69,11 @@
             {{ formatTime12h(event.start_datetime) }},
             {{ event.location?.venue }}
             ({{ event.location?.neighborhood || event.location?.city || 'Oakland'}}).
-            {{ event.description }}
+            <span v-html="itemDescriptionHtml(event.description || '')"></span>
             [<a :href="event.source_url">{{event.source_url_provider || event.organizer?.name || event.source_url}}</a>]
             <button
               v-if="allowEdits && !currentEditEventId"
-              class="btn"
+              class="btn btn-edit-full"
               type="button"
               @click="setCurrentEditEvent(event)"
             >
@@ -109,12 +109,36 @@
 
               <label class="field">
                 <span class="fieldLabel">Description</span>
-                <textarea
-                  class="textarea"
-                  v-model="editedItemDescription"
-                  rows="8"
-                />
               </label>
+              <div class="mdWrap">
+                <div class="mdToolbar">
+                  <button class="btn" type="button"
+                    :disabled="!descriptionEditor"
+                    @mousedown.prevent.stop
+                    @click="descriptionEditor?.chain().focus().toggleBold().run()"
+                  >
+                    Bold
+                  </button>
+
+                  <button class="btn" type="button"
+                    :disabled="!descriptionEditor"
+                    @mousedown.prevent
+                    @click="descriptionEditor?.chain().focus().toggleItalic().run()"
+                  >
+                    Italic
+                  </button>
+
+                  <button class="btn" type="button"
+                    :disabled="!descriptionEditor"
+                    @mousedown.prevent
+                    @click="setLink"
+                  >
+                    Link
+                  </button>
+                </div>
+
+                <EditorContent :editor="descriptionEditor" />
+              </div>
 
               <label class="field">
                 <span class="fieldLabel">URL</span>
@@ -194,14 +218,36 @@
                   <input class="input" type="text" v-model="editedItemNeighborhood" />
                 </label>
 
-                <label class="field">
-                  <span class="fieldLabel">Description</span>
-                  <textarea
-                    class="textarea"
-                    v-model="editedItemDescription"
-                    rows="8"
-                  />
-                </label>
+                <span class="fieldLabel">Description</span>
+                <div class="mdWrap">
+                  <div class="mdToolbar">
+                    <button class="btn" type="button"
+                      :disabled="!descriptionEditor"
+                      @mousedown.prevent
+                      @click="descriptionEditor?.chain().focus().toggleBold().run()"
+                    >
+                      Bold
+                    </button>
+
+                    <button class="btn" type="button"
+                      :disabled="!descriptionEditor"
+                      @mousedown.prevent
+                      @click="descriptionEditor?.chain().focus().toggleItalic().run()"
+                    >
+                      Italic
+                    </button>
+
+                    <button class="btn" type="button"
+                      :disabled="!descriptionEditor"
+                      @mousedown.prevent
+                      @click="setLink"
+                    >
+                      Link
+                    </button>
+                  </div>
+
+                  <EditorContent :editor="descriptionEditor" />
+                </div>
 
                 <label class="field">
                   <span class="fieldLabel">URL</span>
@@ -244,7 +290,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useEditor, EditorContent } from "@tiptap/vue-3";
+import StarterKit from "@tiptap/starter-kit";
+import Link from "@tiptap/extension-link";
+import { Markdown } from "@tiptap/markdown";
+import MarkdownIt from "markdown-it";
+import DOMPurify from "dompurify";
 
 type CalendarLocation = {
   city?: string | null,
@@ -479,6 +531,69 @@ const editedItemMetadataDone = ref<boolean>(false);
 const editedItemMetadataIncoming = ref<boolean>(false);
 const editedItemMetadataSupplemental = ref<boolean>(false);
 
+const md = new MarkdownIt({ linkify: true, breaks: true });
+
+function itemDescriptionHtml(itemDescriptionMarkdown: string): string {
+  // sanitize HTML output before using v-html
+  return DOMPurify.sanitize(md.renderInline(itemDescriptionMarkdown ?? ""));
+}
+
+const descriptionEditor = useEditor({
+  extensions: [
+    StarterKit,
+    Link.configure({
+      openOnClick: false,
+      autolink: true,
+      linkOnPaste: true,
+    }),
+   Markdown,
+  ],
+  content: "", // markdown
+  editorProps: {
+    attributes: {
+      class: "mdEditor",
+    },
+  },
+  onUpdate({ editor }) {
+    // Persist as Markdown string
+    editedItemDescription.value = editor.getMarkdown();
+  }
+});
+
+watch(
+  () => currentEditEventId.value,
+  (eventId) => {
+
+    const editor = descriptionEditor.value;
+    if (!editor) return;
+
+    // If user is editing, don't push content back down.
+    if (editor.isFocused) return;
+
+    if (eventId) {
+      editor.commands.setContent(editedItemDescription.value || "", { contentType: "markdown" });
+      editor.commands.focus("end");
+    }
+  }
+);
+
+onBeforeUnmount(() => {
+  descriptionEditor.value?.destroy();
+});
+
+function setLink(): void {
+  const editor = descriptionEditor.value;
+  if (!editor) return;
+
+  const prev = editor.getAttributes("link").href as string | undefined;
+  const url = window.prompt("Link URL:", prev ?? "https://");
+  if (!url) {
+    editor.chain().focus().extendMarkRange("link").unsetLink().run();
+    return;
+  }
+  editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
+}
+
 function extractIsoTimezone(iso: string): string | null {
   const m = iso.match(/(Z|[+-]\d{2}:\d{2})$/);
   return m ? m[1] : null;
@@ -705,6 +820,10 @@ body {
   display: block;
 }
 
+.btn-edit-full {
+  margin-top: 10px;
+}
+
 .btn-inline {
   display: inline;
   margin-right: 5px;
@@ -822,5 +941,42 @@ body {
 
 .text-not-done {
   color: #888;
+}
+
+.mdWrap {
+  display: grid;
+  gap: 10px;
+}
+
+.mdToolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mdEditor {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 12px;
+  min-height: 120px;
+}
+
+.mdEditor:focus {
+  outline: none;
+}
+
+.mdPreview {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  min-height: 60px;
+}
+
+.mdPreview :where(p) {
+  margin: 0.4em 0;
+}
+
+.mdPreview :where(a) {
+  text-decoration: underline;
 }
 </style>
