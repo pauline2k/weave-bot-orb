@@ -4,6 +4,10 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from collections import defaultdict
+from zoneinfo import ZoneInfo
+
+# All event times are in Pacific Time, regardless of server timezone
+PACIFIC = ZoneInfo("America/Los_Angeles")
 
 from src.config import Config
 
@@ -21,7 +25,7 @@ def get_orb_week_range() -> tuple[datetime, datetime]:
         Tuple of (start_date, end_date) as datetime objects
         start_date is midnight on Tuesday, end_date is 23:59:59 on Sunday
     """
-    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today = datetime.now(PACIFIC).replace(hour=0, minute=0, second=0, microsecond=0)
     current_weekday = today.weekday()  # Monday=0, Tuesday=1, ..., Sunday=6
 
     # Find the next Tuesday (weekday=1)
@@ -142,7 +146,7 @@ def format_datetime_for_orb(timestamp: Optional[float]) -> tuple[str, str]:
         return ("TBD", "Time TBD")
 
     try:
-        dt = datetime.fromtimestamp(timestamp)
+        dt = datetime.fromtimestamp(timestamp, tz=PACIFIC)
         day_header = dt.strftime("%A, %b %d")  # "Tuesday, Nov 18"
         time_str = dt.strftime("%-I:%M%p").lower()  # "6:30pm"
         return (day_header, time_str)
