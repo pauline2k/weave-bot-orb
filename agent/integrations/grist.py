@@ -172,7 +172,7 @@ async def fetch_events_from_grist(
         GristResult with an array of Event objects
     """
     api_key = api_key or getattr(settings, 'grist_api_key', None)
-    doc_id = doc_id or GRIST_DOC_ID
+    doc_id = doc_id or settings.grist_doc_id
 
     if not api_key:
         logger.error("No Grist API key configured")
@@ -344,7 +344,7 @@ async def update_grist_event(
         True if successful, False otherwise
     """
     api_key = api_key or getattr(settings, 'grist_api_key', None)
-    doc_id = doc_id or GRIST_DOC_ID
+    doc_id = doc_id or settings.grist_doc_id
 
     if not api_key:
         logger.error("No Grist API key configured")
