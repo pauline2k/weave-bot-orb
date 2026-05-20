@@ -31,11 +31,11 @@ class WebhookServer:
         Expected payload:
         {
             "request_id": "agent-request-id",
-            "discord_message_id": 123456789 (optional),
+            "client_reference_id": "123456789" (Discord message ID as string),
             "status": "completed" | "failed",
             "event": { ... event data ... } (if successful),
             "error": "error message" (if failed),
-            "result_url": "https://grist.example.com/..." (future: Grist link)
+            "result_url": "https://grist.example.com/..." (Grist link)
         }
         """
         try:

@@ -26,3 +26,21 @@ class LLMExtractor(ABC):
             Extracted Event object
         """
         pass
+
+    @abstractmethod
+    async def extract_event_from_image(
+        self,
+        image_b64: str,
+        source_description: Optional[str] = None
+    ) -> Event:
+        """
+        Extract event information from an image.
+
+        Args:
+            image_b64: Base64-encoded image data
+            source_description: Optional description of where the image came from
+
+        Returns:
+            Extracted Event object
+        """
+        pass

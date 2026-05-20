@@ -27,6 +27,7 @@ class WeaveBotClient(discord.Client):
         super().__init__(intents=intents)
         self.db = db
         self.agent_api_url = Config.AGENT_API_URL
+        self.org_id = Config.ORG_ID
         self.monitored_channels = set(Config.DISCORD_CHANNELS)
 
         # Callback URL for agent to POST results back
@@ -189,7 +190,8 @@ class WeaveBotClient(discord.Client):
             async with aiohttp.ClientSession() as session:
                 payload = {
                     "callback_url": self.callback_url,
-                    "discord_message_id": message_id,
+                    "client_reference_id": str(message_id),
+                    "org_id": self.org_id,
                     "parse_mode": parse_mode
                 }
 

@@ -38,6 +38,15 @@ class Database:
         logger.info(f'Database path: {db_path}')
         logger.info(f'Absolute database path: {abs_path}')
         logger.info(f'Current working directory: {os.getcwd()}')
+
+        # Warn if database is not on a persistent volume (Railway ephemeral storage)
+        if os.environ.get('RAILWAY_ENVIRONMENT') and not abs_path.startswith('/data'):
+            logger.warning(
+                'Database is NOT on a persistent volume (/data). '
+                'Data will be lost on redeploy! Set DB_PATH=/data/weave_bot.db '
+                'and mount a Railway volume at /data.'
+            )
+
         self._init_db()
 
     def _get_connection(self):

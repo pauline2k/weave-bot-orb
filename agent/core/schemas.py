@@ -62,6 +62,7 @@ class Event(BaseModel):
 class ScrapeRequest(BaseModel):
     """Request to scrape an event from a URL."""
     url: HttpUrl
+    org_id: str = Field(default="default", description="Organization ID for LLM/storage routing")
     include_screenshot: bool = True
     wait_time: int = Field(
         default=3000,
@@ -107,10 +108,11 @@ class ParseRequest(BaseModel):
     callback_url: HttpUrl = Field(
         description="URL to POST results when parsing completes"
     )
-    discord_message_id: Optional[int] = Field(
+    client_reference_id: Optional[str] = Field(
         default=None,
-        description="Discord message ID for tracking (passed through to callback)"
+        description="Client-provided reference ID for tracking (passed through to callback)"
     )
+    org_id: str = Field(default="default", description="Organization ID for LLM/storage routing")
     parse_mode: Literal["url", "image", "hybrid"] = Field(
         default="url",
         description="Parsing mode: 'url' for webpage, 'image' for uploaded image, 'hybrid' for both"
@@ -150,7 +152,7 @@ class CallbackPayload(BaseModel):
     Future: result_url will point to Grist record after integration.
     """
     request_id: str
-    discord_message_id: Optional[int] = None
+    client_reference_id: Optional[str] = None
     status: Literal["completed", "failed"]
     event: Optional[Event] = None
     error: Optional[str] = None

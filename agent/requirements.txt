@@ -10,6 +10,10 @@ playwright>=1.40.0
 
 # LLM
 google-generativeai>=0.3.0
+openai>=1.0.0
+
+# Configuration
+pyyaml>=6.0
 
 # Content extraction
 trafilatura>=1.6.0
@@ -20,3 +24,7 @@ aiohttp>=3.9.0
 
 # Image processing (for screenshots)
 Pillow>=10.0.0
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0

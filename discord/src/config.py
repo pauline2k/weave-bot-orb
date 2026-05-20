@@ -15,6 +15,9 @@ class Config:
         if ch.strip()
     ]
 
+    # Org identity — which org this Discord bot represents
+    ORG_ID: str = os.getenv("ORG_ID", "orb")
+
     # Agent settings
     AGENT_API_URL: str = os.getenv("AGENT_API_URL", "http://localhost:8000/parse")
 

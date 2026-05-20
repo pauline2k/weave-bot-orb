@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 async def send_callback(
     callback_url: str,
     request_id: str,
-    discord_message_id: Optional[int],
+    client_reference_id: Optional[str],
     status: str,
     event: Optional[Event] = None,
     error: Optional[str] = None,
@@ -25,7 +25,7 @@ async def send_callback(
     Args:
         callback_url: URL to POST results to
         request_id: Unique request identifier
-        discord_message_id: Discord message ID (passed through)
+        client_reference_id: Client reference ID (passed through)
         status: "completed" or "failed"
         event: Extracted event data (if successful)
         error: Error message (if failed)
@@ -38,7 +38,7 @@ async def send_callback(
     """
     payload = CallbackPayload(
         request_id=request_id,
-        discord_message_id=discord_message_id,
+        client_reference_id=client_reference_id,
         status=status,
         event=event,
         error=error,

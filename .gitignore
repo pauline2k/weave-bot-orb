@@ -5,6 +5,10 @@
 # But not under the front end
 !frontend/.env
 
+# Org config (may reference secrets via env vars)
+agent/orgs.yaml
+!agent/orgs.example.yaml
+
 # Python
 __pycache__/
 *.py[cod]

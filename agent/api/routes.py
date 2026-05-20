@@ -13,8 +13,10 @@ from agent.core.schemas import (
     ParseResponse,
     UpdateResponse
 )
+from agent.core.org_config import get_org_config, get_all_org_configs
 from agent.core.tasks import task_runner, ParseTask
 from agent.integrations.grist import fetch_events_from_grist, update_grist_event
+from agent.llm.factory import create_extractor
 from agent.scraper.orchestrator import ScrapingOrchestrator
 
 router = APIRouter()
@@ -120,12 +122,18 @@ async def scrape_event(request: ScrapeRequest) -> ScrapeResponse:
     4. Returns the event information in a standardized format
 
     Args:
-        request: ScrapeRequest containing URL and options
+        request: ScrapeRequest containing URL, org_id, and options
 
     Returns:
         ScrapeResponse with extracted event data or error information
     """
-    orchestrator = ScrapingOrchestrator()
+    try:
+        org_config = get_org_config(request.org_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    llm_extractor = create_extractor(org_config)
+    orchestrator = ScrapingOrchestrator(llm_extractor=llm_extractor)
 
     try:
         response = await orchestrator.scrape_event(
@@ -157,15 +165,18 @@ async def parse_event(request: ParseRequest) -> ParseResponse:
     - "image": Parse from uploaded image (requires image_base64)
     - "hybrid": Parse from both URL and image together
 
-    This is designed for Discord bot integration where we need
-    to respond quickly and update the user later.
-
     Args:
-        request: ParseRequest with URL/image and callback_url
+        request: ParseRequest with URL/image, org_id, and callback_url
 
     Returns:
         ParseResponse with request_id for tracking
     """
+    # Validate org_id early
+    try:
+        get_org_config(request.org_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     # Validate required fields based on parse_mode
     if request.parse_mode == "url" and not request.url:
         raise HTTPException(
@@ -191,7 +202,8 @@ async def parse_event(request: ParseRequest) -> ParseResponse:
         request_id=response.request_id,
         url=str(request.url) if request.url else None,
         callback_url=str(request.callback_url),
-        discord_message_id=request.discord_message_id,
+        client_reference_id=request.client_reference_id,
+        org_id=request.org_id,
         parse_mode=request.parse_mode,
         image_base64=request.image_base64,
         include_screenshot=request.include_screenshot,
@@ -209,11 +221,18 @@ async def health_check():
     Health check endpoint.
 
     Returns:
-        Simple status message including active task count
+        Status with active task count and configured orgs
     """
+    orgs = get_all_org_configs()
+    org_info = {
+        org_id: {"name": cfg.name, "llm_provider": cfg.llm.provider}
+        for org_id, cfg in orgs.items()
+    }
+
     return {
         "status": "healthy",
         "service": "event-scraper",
-        "version": "0.1.0",
-        "active_tasks": task_runner.get_active_count()
+        "version": "0.2.0",
+        "active_tasks": task_runner.get_active_count(),
+        "orgs": org_info,
     }

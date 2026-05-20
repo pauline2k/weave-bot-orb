@@ -3,3 +3,7 @@ builder = "NIXPACKS"
 
 [deploy]
 startCommand = "uv run python -m src.main"
+
+# Mount a persistent volume for SQLite database
+# Configure in Railway dashboard: Volume mount path = /data
+# Then set env var: DB_PATH=/data/weave_bot.db

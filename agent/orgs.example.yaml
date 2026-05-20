@@ -1,0 +1,50 @@
+# Example org configuration for weave-bot-orb
+# Copy to orgs.yaml and fill in secrets as env vars
+#
+# Secrets use ${VAR_NAME} syntax — replaced with os.environ at load time.
+# The orgs.yaml file is gitignored; this example is tracked.
+
+orgs:
+  orb:
+    name: "Oakland Review of Books"
+    timezone: "America/Los_Angeles"
+
+    llm:
+      provider: "gemini"
+      api_key: "${ORB_GEMINI_API_KEY}"
+      model: "gemini-2.5-flash-lite"
+
+    storage:
+      backend: "grist"
+      api_key: "${ORB_GRIST_API_KEY}"
+      doc_id: "b2r9qYM2Lr9xJ2epHVV1K2"
+      table_name: "Events"
+      ui_host: "oaklog.getgrist.com"
+      ui_page_name: "ORB-Events"
+
+    chat:
+      platform: "discord"
+      channels: [1438314815901794364]
+
+  # Example second org (uncomment and configure)
+  # org2:
+  #   name: "Second Organization"
+  #   timezone: "America/Los_Angeles"
+  #
+  #   llm:
+  #     provider: "openai_compatible"
+  #     api_key: "${ORG2_HF_API_KEY}"
+  #     model: "PleIAs/pleias-large"
+  #     endpoint_url: "https://api-inference.huggingface.co/v1"
+  #
+  #   storage:
+  #     backend: "grist"
+  #     api_key: "${ORG2_GRIST_API_KEY}"
+  #     doc_id: "their-grist-doc-id"
+  #     table_name: "Events"
+  #     ui_host: "their-host.getgrist.com"
+  #     ui_page_name: "Events"
+  #
+  #   chat:
+  #     platform: "slack"
+  #     channels: ["C0123456789"]

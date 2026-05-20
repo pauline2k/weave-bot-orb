@@ -2,48 +2,98 @@
 from typing import Dict, Any, Optional
 from agent.scraper.browser import BrowserManager
 from agent.scraper.processor import ContentProcessor
+from agent.llm.base import LLMExtractor
 from agent.llm.gemini import GeminiExtractor
 from agent.core.schemas import Event, ScrapeResponse
+from agent.core.validation import validate_event
 
 
 class ScrapingOrchestrator:
     """Orchestrates the complete event scraping pipeline."""
 
-    def __init__(self):
-        """Initialize the orchestrator with LLM extractor."""
-        self.llm_extractor = GeminiExtractor()
+    def __init__(self, llm_extractor: Optional[LLMExtractor] = None):
+        """Initialize the orchestrator with optional LLM extractor."""
+        self.llm_extractor = llm_extractor or GeminiExtractor()
         self.content_processor = ContentProcessor()
 
-    def _apply_json_ld_dates(self, event: Event, json_ld_data: Dict[str, Any]) -> Event:
+    def _apply_json_ld_overrides(self, event: Event, json_ld_data: Dict[str, Any]) -> Event:
         """
-        Override event dates with authoritative JSON-LD data.
+        Override event fields with authoritative JSON-LD structured data.
 
-        LLMs often get dates wrong, but JSON-LD structured data is authoritative.
+        JSON-LD is more reliable than LLM extraction for dates, venue,
+        address, and organizer — especially on Eventbrite and Luma.
         """
         event_dict = event.model_dump()
+        overrides = []
 
-        # Override start_datetime if available in JSON-LD
+        # Override dates
         if 'startDate' in json_ld_data:
             start_date = json_ld_data['startDate']
-            # Clean up milliseconds: "2025-11-20T18:30:00.000-08:00" -> "2025-11-20T18:30:00-08:00"
             if '.000' in start_date:
                 start_date = start_date.replace('.000', '')
             event_dict['start_datetime'] = start_date
+            overrides.append("dates")
 
-        # Override end_datetime if available
         if 'endDate' in json_ld_data:
             end_date = json_ld_data['endDate']
             if '.000' in end_date:
                 end_date = end_date.replace('.000', '')
             event_dict['end_datetime'] = end_date
+            if "dates" not in overrides:
+                overrides.append("dates")
 
-        # Add note about JSON-LD override
-        notes = event_dict.get('extraction_notes') or ''
-        if 'startDate' in json_ld_data:
-            notes = f"Dates from JSON-LD structured data. {notes}".strip()
+        # Override venue and address from location
+        location = json_ld_data.get('location')
+        if isinstance(location, dict):
+            venue_name = location.get('name', '').strip()
+            if venue_name and len(venue_name) > 1:
+                if event_dict.get('location') is None:
+                    event_dict['location'] = {}
+                event_dict['location']['venue'] = venue_name
+                overrides.append("venue")
+
+            address = location.get('address')
+            if address:
+                address_str = self._parse_json_ld_address(address)
+                if address_str:
+                    if event_dict.get('location') is None:
+                        event_dict['location'] = {}
+                    event_dict['location']['address'] = address_str
+                    overrides.append("address")
+
+        # Override organizer
+        organizer = json_ld_data.get('organizer')
+        if isinstance(organizer, dict):
+            org_name = organizer.get('name', '').strip()
+            if org_name and len(org_name) > 1:
+                if event_dict.get('organizer') is None:
+                    event_dict['organizer'] = {}
+                event_dict['organizer']['name'] = org_name
+                overrides.append("organizer")
+
+        # Add note about what was overridden
+        if overrides:
+            notes = event_dict.get('extraction_notes') or ''
+            override_note = f"JSON-LD overrides: {', '.join(overrides)}."
+            notes = f"{override_note} {notes}".strip()
             event_dict['extraction_notes'] = notes
 
         return Event(**event_dict)
+
+    @staticmethod
+    def _parse_json_ld_address(address) -> Optional[str]:
+        """Parse JSON-LD address — handles both string and PostalAddress object."""
+        if isinstance(address, str):
+            return address.strip() or None
+        if isinstance(address, dict):
+            parts = [
+                address.get('streetAddress', ''),
+                address.get('addressLocality', ''),
+                address.get('addressRegion', ''),
+            ]
+            result = ', '.join(p.strip() for p in parts if p and p.strip())
+            return result or None
+        return None
 
     async def scrape_event(
         self,
@@ -111,7 +161,10 @@ class ScrapingOrchestrator:
             # Step 4: Post-process - override with authoritative JSON-LD dates
             json_ld_data = self.content_processor.get_json_ld_event_data()
             if json_ld_data:
-                event = self._apply_json_ld_dates(event, json_ld_data)
+                event = self._apply_json_ld_overrides(event, json_ld_data)
+
+            # Step 5: Validate extracted data (warns but never rejects)
+            event = validate_event(event)
 
             metadata["confidence_score"] = event.confidence_score
 
@@ -180,6 +233,9 @@ class ScrapingOrchestrator:
                 image_b64=image_b64,
                 source_description=source_description
             )
+
+            # Validate extracted data (warns but never rejects)
+            event = validate_event(event)
 
             metadata["confidence_score"] = event.confidence_score
 

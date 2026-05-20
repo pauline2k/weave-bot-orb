@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 from agent.core.callback import send_callback
 from agent.core.schemas import Event
+from agent.core.org_config import get_org_config
+from agent.llm.factory import create_extractor
 from agent.scraper.orchestrator import ScrapingOrchestrator
 from agent.integrations.grist import save_event_to_grist
 
@@ -17,7 +19,8 @@ class ParseTask:
     """Represents a background parse task."""
     request_id: str
     callback_url: str
-    discord_message_id: Optional[int]
+    client_reference_id: Optional[str]
+    org_id: str = "default"
     # URL parsing fields
     url: Optional[str] = None
     include_screenshot: bool = True
@@ -83,9 +86,11 @@ class TaskRunner:
         status = "failed"
 
         try:
-            logger.info(f"Starting parse task {task.request_id} (mode={task.parse_mode})")
+            logger.info(f"Starting parse task {task.request_id} (mode={task.parse_mode}, org={task.org_id})")
 
-            orchestrator = ScrapingOrchestrator()
+            org_config = get_org_config(task.org_id)
+            llm_extractor = create_extractor(org_config)
+            orchestrator = ScrapingOrchestrator(llm_extractor=llm_extractor)
 
             # Route to appropriate handler based on parse mode
             if task.parse_mode == "image":
@@ -129,11 +134,19 @@ class TaskRunner:
             error = str(e)
             logger.exception(f"Task {task.request_id} crashed: {e}")
 
-        # Save to Grist if successful
+        # Save to Grist if successful (using per-org credentials)
         result_url = None
         grist_record_id = None
         if status == "completed" and event:
-            grist_result = await save_event_to_grist(event)
+            storage = org_config.storage
+            grist_result = await save_event_to_grist(
+                event,
+                api_key=storage.api_key or None,
+                doc_id=storage.doc_id or None,
+                ui_host=storage.ui_host or None,
+                ui_doc_id=storage.ui_doc_id,
+                ui_page_name=storage.ui_page_name or None,
+            )
             if grist_result.success:
                 result_url = grist_result.record_url
                 grist_record_id = grist_result.record_id
@@ -151,7 +164,7 @@ class TaskRunner:
         await send_callback(
             callback_url=task.callback_url,
             request_id=task.request_id,
-            discord_message_id=task.discord_message_id,
+            client_reference_id=task.client_reference_id,
             status=status,
             event=event,
             error=error,
