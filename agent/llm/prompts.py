@@ -33,6 +33,7 @@ EVENT_JSON_SCHEMA = """\
     "venue": "string or null (venue name)",
     "address": "string or null (full address)",
     "city": "string or null",
+    "neighborhood": "string or null (include only if the city is Oakland)",
     "url": "string or null (for virtual events)"
   }} or null,
   "organizer": {{
@@ -41,6 +42,7 @@ EVENT_JSON_SCHEMA = """\
     "url": "string or null"
   }} or null,
   "registration_url": "string or null (link to register/buy tickets)",
+  "source_url_provider": "string or null",
   "price": "string or null (e.g., 'Free', '$20', '$10-$25')",
   "tags": ["array", "of", "strings"],
   "image_url": "string or null (main event image URL)",
@@ -76,9 +78,15 @@ IMPORTANT INSTRUCTIONS:
    - ALWAYS include timezone offset in the datetime string
    - Default to {ctx["timezone_name"]}: {ctx["offset_str"]} (current offset, accounts for DST)
    - Only use a different timezone if explicitly stated in the content
-5. If the page contains MULTIPLE events, extract the PRIMARY or FIRST event
-6. Set confidence_score based on how complete and certain the information is
-7. Use extraction_notes to explain any assumptions, missing data, or ambiguities
+5. For neighborhood:
+   - If the city is not Oakland, leave this value null.
+   - If the city is Oakland, use the Oakland neighborhood that corresponds most closely to the address (examples: Downtown, Temescal, Grand Lake, Adams Point).
+6. For source_url_provider:
+   - Return the name of the organization indicated by the hostname of the url {url}.
+   - For Instagram, use the lowercase shorthand "insta."
+7. If the page contains MULTIPLE events, extract the PRIMARY or FIRST event
+8. Set confidence_score based on how complete and certain the information is
+9. Use extraction_notes to explain any assumptions, missing data, or ambiguities
 
 WEBPAGE CONTENT:
 {content}
@@ -111,13 +119,19 @@ IMPORTANT INSTRUCTIONS:
    - ALWAYS include timezone offset in datetime (e.g., '2026-01-20T19:00:00{ctx["offset_str"]}')
    - Default to {ctx["timezone_name"]}: {ctx["offset_str"]} (current offset, accounts for DST)
    - Only use a different timezone if explicitly stated in the image
-5. Read ALL text in the image carefully - event details are often in smaller text
-6. Set confidence_score LOWER if:
+5. For neighborhood:
+   - If the city is not Oakland, leave this value null.
+   - If the city is Oakland, use the Oakland neighborhood that corresponds most closely to the address (examples: Downtown, Temescal, Grand Lake, Adams Point).
+6. For source_url_provider:
+   - Return the name of the organization indicated by the hostname of the url {url}.
+   - For Instagram, use the lowercase shorthand "insta."
+7. Read ALL text in the image carefully - event details are often in smaller text
+8. Set confidence_score LOWER if:
    - Text is blurry, small, or hard to read
    - Information appears cut off or partially visible
    - Image quality is poor
    - You had to make assumptions about unclear text
-7. Use extraction_notes to document:
+9. Use extraction_notes to document:
    - Any text you couldn't read clearly
    - Assumptions you made
    - Parts of the image that seem cut off
