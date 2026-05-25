@@ -54,6 +54,8 @@ class ContentProcessor:
                             if isinstance(item, dict) and (item.get('@type') == 'Event' or 'startDate' in item):
                                 event_data = item
                                 break
+                # Remove any falsey values that will break validation.
+                event_data = dict((k, v) for k, v in event_data.items() if v)
             except json.JSONDecodeError:
                 pass
 
