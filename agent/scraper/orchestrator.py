@@ -1,4 +1,5 @@
 """Orchestrates the complete scraping pipeline."""
+import logging
 from typing import Dict, Any, Optional
 from agent.scraper.browser import BrowserManager
 from agent.scraper.processor import ContentProcessor
@@ -6,6 +7,8 @@ from agent.llm.base import LLMExtractor
 from agent.llm.gemini import GeminiExtractor
 from agent.core.schemas import Event, ScrapeResponse
 from agent.core.validation import validate_event
+
+logger = logging.getLogger(__name__)
 
 
 class ScrapingOrchestrator:
@@ -132,6 +135,8 @@ class ScrapingOrchestrator:
                     wait_time=wait_time,
                     include_screenshot=include_screenshot
                 )
+
+            logger.info(f"Scraped page (include_screenshot={include_screenshot})")
 
             if not page_data["success"]:
                 return ScrapeResponse(

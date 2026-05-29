@@ -95,6 +95,8 @@ class GeminiExtractor(LLMExtractor):
                 response = self.model.generate_content(parts)
                 response_text = self._clean_response_text(response.text)
 
+                logger.info(f"response text: {response_text}")
+
                 try:
                     event_data = json.loads(response_text)
                 except json.JSONDecodeError as json_error:
@@ -155,6 +157,8 @@ class GeminiExtractor(LLMExtractor):
         parts = [prompt]
 
         if screenshot_b64:
+            logger.info(f"Including screenshot in parse")
+            logger.info(screenshot_b64)
             try:
                 image_bytes = base64.b64decode(screenshot_b64)
                 image = Image.open(io.BytesIO(image_bytes))
