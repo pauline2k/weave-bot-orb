@@ -136,10 +136,13 @@ async def scrape_event(request: ScrapeRequest) -> ScrapeResponse:
     orchestrator = ScrapingOrchestrator(llm_extractor=llm_extractor)
 
     try:
+        include_screenshot = True
+        if request.include_screenshot == "false":
+            include_screenshot = False
         response = await orchestrator.scrape_event(
             url=str(request.url),
             wait_time=request.wait_time,
-            include_screenshot=request.include_screenshot
+            include_screenshot=include_screenshot
         )
         return response
 
