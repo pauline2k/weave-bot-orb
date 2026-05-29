@@ -122,9 +122,7 @@ IMPORTANT INSTRUCTIONS:
 5. For neighborhood:
    - If the city is not Oakland, leave this value null.
    - If the city is Oakland, use the Oakland neighborhood that corresponds most closely to the address (examples: Downtown, Temescal, Grand Lake, Adams Point).
-6. For source_url_provider:
-   - Return the name of the organization indicated by the hostname of the url {url}.
-   - For Instagram, use the lowercase shorthand "insta."
+6. For source_url_provider, return null.
 7. Read ALL text in the image carefully - event details are often in smaller text
 8. Set confidence_score LOWER if:
    - Text is blurry, small, or hard to read
