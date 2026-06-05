@@ -167,6 +167,9 @@
                 <button class="btn" type="button" :disabled="updating" @click="onCancelUpdate">
                   Cancel
                 </button>
+                <button class="btn btn-delete" type="button" :disabled="deleting" @click="deleteEvent(event)">
+                  Delete event
+                </button>
 
                 <span v-if="updateOk" class="ok">Updated.</span>
                 <span v-if="updateError" class="errorInline">Error: {{ updateError }}</span>
@@ -275,6 +278,9 @@
                   </button>
                   <button class="btn" type="button" :disabled="updating" @click="onCancelUpdate">
                     Cancel
+                  </button>
+                  <button class="btn btn-delete" type="button" :disabled="deleting" @click="deleteEvent(event)">
+                    Delete event
                   </button>
 
                   <span v-if="updateOk" class="ok">Updated.</span>
@@ -514,6 +520,35 @@ async function fetchCalendar(): Promise<void> {
 }
 
 const currentEditEventId = ref<number | null>(null)
+
+const deleting = ref<boolean>(false)
+
+async function deleteEvent(event: CalendarEvent): Promise<void> {
+  if (!event.grist_record_id) return
+  if (!window.confirm(`Delete "${event.title}"?`)) return
+
+  deleting.value = true
+  error.value = ''
+
+  try {
+    const res = await fetch(`/api/calendar/${event.grist_record_id}`, {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' },
+      credentials: 'include',
+    })
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`)
+    }
+
+    await fetchCalendar()
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    deleting.value = false
+  }
+}
 
 const updating = ref<boolean>(false);
 const updateError = ref<string | null>(null);
@@ -822,6 +857,11 @@ body {
 
 .btn-edit-full {
   margin-top: 10px;
+}
+
+.btn-delete {
+  color: #c0392b;
+  border-color: #c0392b;
 }
 
 .btn-inline {

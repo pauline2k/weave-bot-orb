@@ -15,7 +15,7 @@ from agent.core.schemas import (
 )
 from agent.core.org_config import get_org_config, get_all_org_configs
 from agent.core.tasks import task_runner, ParseTask
-from agent.integrations.grist import fetch_events_from_grist, update_grist_event
+from agent.integrations.grist import fetch_events_from_grist, update_grist_event, delete_grist_event
 from agent.llm.factory import create_extractor
 from agent.scraper.orchestrator import ScrapingOrchestrator
 
@@ -103,6 +103,19 @@ async def update_calendar_event(event_id: int, event: Event) -> UpdateResponse:
         )
         return UpdateResponse(success=success)
 
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
+
+
+@router.delete("/calendar/{event_id}", dependencies=[Depends(require_session)], response_model=UpdateResponse)
+async def delete_calendar_event(event_id: int) -> UpdateResponse:
+    """Delete a Grist event record by row ID."""
+    try:
+        success = await delete_grist_event(event_id=event_id)
+        return UpdateResponse(success=success)
     except Exception as e:
         raise HTTPException(
             status_code=500,

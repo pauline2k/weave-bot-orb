@@ -327,6 +327,64 @@ async def save_event_to_grist(
         return GristResult(success=False, error=f"Unexpected error: {e}")
 
 
+async def delete_grist_event(
+    event_id: int,
+    api_key: Optional[str] = None,
+    doc_id: Optional[str] = None,
+    timeout: float = 15.0
+) -> bool:
+    """
+    Delete a specific record from the Grist Events table.
+
+    Args:
+        event_id: Grist row ID to delete
+        api_key: Grist API key (defaults to settings)
+        doc_id: Grist document ID (defaults to ORB Events doc)
+        timeout: Request timeout in seconds
+
+    Returns:
+        True if successful, False otherwise
+    """
+    api_key = api_key or getattr(settings, 'grist_api_key', None)
+    doc_id = doc_id or settings.grist_doc_id
+
+    if not api_key:
+        logger.error("No Grist API key configured")
+        return False
+
+    url = f"{GRIST_API_BASE}/docs/{doc_id}/tables/{GRIST_TABLE}/data/delete"
+
+    logger.info(f"Deleting Grist event id {event_id}")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                json=[event_id],
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=aiohttp.ClientTimeout(total=timeout)
+            ) as response:
+                if response.status == 200:
+                    return True
+                else:
+                    body = await response.text()
+                    logger.error(
+                        f"Grist API error deleting event: "
+                        f"status={response.status}, body={body}"
+                    )
+                    return False
+
+    except aiohttp.ClientError as e:
+        logger.error(f"Grist connection error: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error deleting Grist event: {e}")
+        return False
+
+
 async def update_grist_event(
     event_id: int,
     event: Event,
