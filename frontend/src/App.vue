@@ -542,6 +542,8 @@ async function deleteEvent(event: CalendarEvent): Promise<void> {
       throw new Error(`HTTP ${res.status} ${res.statusText}${text ? ` — ${text}` : ''}`)
     }
 
+    currentEditEventId.value = null
+    resetUpdateForm()
     await fetchCalendar()
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : String(e)
