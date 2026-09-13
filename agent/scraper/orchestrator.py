@@ -1,5 +1,7 @@
 """Orchestrates the complete scraping pipeline."""
 import logging
+import re
+from datetime import datetime
 from typing import Dict, Any, Optional
 from agent.scraper.browser import BrowserManager
 from agent.scraper.processor import ContentProcessor
@@ -7,8 +9,69 @@ from agent.llm.base import LLMExtractor
 from agent.llm.gemini import GeminiExtractor
 from agent.core.schemas import Event, ScrapeResponse
 from agent.core.validation import validate_event
+from agent.core.time_utils import resolve_timezone, correct_wallclock_offset
 
 logger = logging.getLogger(__name__)
+
+# Matches a trailing "GMT+0000"/"UTC-0800"/"+00:00"-style offset suffix,
+# with or without a GMT/UTC label, with or without a colon in the offset.
+_TRAILING_OFFSET_RE = re.compile(r'\s*(?:GMT|UTC)?[+-]\d{2}:?\d{2}\s*$', re.IGNORECASE)
+
+
+def _parse_json_ld_datetime(raw: Optional[str]) -> Optional[datetime]:
+    """Parse a JSON-LD startDate/endDate value robustly.
+
+    Most sites emit clean ISO 8601 with a real, meaningful offset (e.g.
+    events.berkeley.edu correctly converts to true UTC - "...T19:00:00+00:00"
+    really is UTC and must be converted properly to get the right local
+    time). But some WordPress event plugins emit a non-standard,
+    space-separated format with a bogus, hardcoded "GMT+0000" suffix
+    regardless of the site's actual timezone - observed on nomadicpress.org:
+    "2026-09-13 15:00:00 GMT+0000", where 15:00 is actually 3pm LOCAL
+    Pacific time (confirmed against that page's own "EVENT TIME: 3:00 pm"
+    text), not 3pm UTC. That trailing garbage also isn't valid ISO 8601 at
+    all, so pydantic's strict parser rejects it outright and crashes the
+    whole extraction.
+
+    Strategy: try strict ISO 8601 first, which preserves a real offset when
+    there is one (Berkeley's case). If that fails, this isn't a
+    standards-compliant timestamp we can trust the offset on - strip any
+    trailing GMT/UTC-style suffix and parse the remaining wall-clock
+    date/time as NAIVE instead of guessing at what the offset means. A
+    naive result is then handled like any other naive event datetime
+    elsewhere in the pipeline (assumed Pacific - see validate_event()).
+    """
+    if not raw:
+        return None
+    cleaned = raw.replace('.000', '').strip()
+    try:
+        return datetime.fromisoformat(cleaned)
+    except ValueError:
+        pass
+    stripped = _TRAILING_OFFSET_RE.sub('', cleaned).strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(stripped, fmt)
+        except ValueError:
+            continue
+    logger.warning(f"Could not parse JSON-LD datetime, skipping override: {raw!r}")
+    return None
+
+
+def _correct_llm_dst_offset(event: Event) -> Event:
+    """Re-derive the correct UTC offset on a raw LLM extraction.
+
+    Must run on the LLM's own output BEFORE any JSON-LD override - a
+    JSON-LD-derived datetime's offset is already correct for its own
+    absolute instant (e.g. converted from an authoritative UTC timestamp),
+    and reinterpreting its wall-clock digits here would corrupt it. See
+    correct_wallclock_offset() for why this correction is needed at all.
+    """
+    zone = resolve_timezone(event.timezone)
+    return event.model_copy(update={
+        "start_datetime": correct_wallclock_offset(event.start_datetime, zone),
+        "end_datetime": correct_wallclock_offset(event.end_datetime, zone),
+    })
 
 
 class ScrapingOrchestrator:
@@ -29,21 +92,21 @@ class ScrapingOrchestrator:
         event_dict = event.model_dump()
         overrides = []
 
-        # Override dates
+        # Override dates - skip a field individually if it can't be parsed
+        # rather than letting a malformed value (e.g. a WordPress plugin's
+        # non-ISO "GMT+0000"-suffixed string) crash the whole extraction.
         if 'startDate' in json_ld_data:
-            start_date = json_ld_data['startDate']
-            if '.000' in start_date:
-                start_date = start_date.replace('.000', '')
-            event_dict['start_datetime'] = start_date
-            overrides.append("dates")
+            parsed = _parse_json_ld_datetime(json_ld_data['startDate'])
+            if parsed is not None:
+                event_dict['start_datetime'] = parsed
+                overrides.append("dates")
 
         if 'endDate' in json_ld_data:
-            end_date = json_ld_data['endDate']
-            if '.000' in end_date:
-                end_date = end_date.replace('.000', '')
-            event_dict['end_datetime'] = end_date
-            if "dates" not in overrides:
-                overrides.append("dates")
+            parsed = _parse_json_ld_datetime(json_ld_data['endDate'])
+            if parsed is not None:
+                event_dict['end_datetime'] = parsed
+                if "dates" not in overrides:
+                    overrides.append("dates")
 
         # Override venue and address from location
         location = json_ld_data.get('location')
@@ -157,11 +220,28 @@ class ScrapingOrchestrator:
             metadata["content_length"] = len(combined_content)
 
             # Step 3: LLM extraction
+            # Prefer the largest full-resolution "content" image found on the
+            # page (e.g. an Instagram post's poster/flyer) over the full-page
+            # screenshot when we have one - it's undimmed by any overlay,
+            # uncropped, and far higher resolution than a shrunk full-page
+            # screenshot, which matters when the only date/time info is text
+            # printed on that image.
+            image_for_llm = page_data.get("content_image") or page_data["screenshot"]
+            if page_data.get("content_image"):
+                metadata["image_source"] = "content_image"
+            elif page_data["screenshot"]:
+                metadata["image_source"] = "full_page_screenshot"
+
             event = await self.llm_extractor.extract_event(
                 url=url,
                 content=combined_content,
-                screenshot_b64=page_data["screenshot"]
+                screenshot_b64=image_for_llm
             )
+
+            # Step 3b: Correct any DST-vs-standard-time offset mismatch in
+            # the LLM's own guess, before it might be replaced outright by
+            # an authoritative JSON-LD date below.
+            event = _correct_llm_dst_offset(event)
 
             # Step 4: Post-process - override with authoritative JSON-LD dates
             json_ld_data = self.content_processor.get_json_ld_event_data()
@@ -238,6 +318,11 @@ class ScrapingOrchestrator:
                 image_b64=image_b64,
                 source_description=source_description
             )
+
+            # Correct any DST-vs-standard-time offset mismatch in the LLM's
+            # own guess (no JSON-LD exists for a bare image, so this is the
+            # only correction pass for this path).
+            event = _correct_llm_dst_offset(event)
 
             # Validate extracted data (warns but never rejects)
             event = validate_event(event)

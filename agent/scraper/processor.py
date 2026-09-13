@@ -23,6 +23,27 @@ class ContentProcessor:
         """Return the last extracted JSON-LD event data."""
         return self._last_event_data
 
+    @staticmethod
+    def _strip_cdata_wrapper(raw: str) -> str:
+        """Strip CDATA-in-comment wrappers some CMSs (e.g. Drupal's schema.org
+        module) put around inline JSON-LD to keep it valid inside XHTML:
+
+            /*<![CDATA[*/ { ... } /*]]>*/
+            <![CDATA[ { ... } ]]>
+
+        Without this, json.loads() fails outright on the wrapped text, which
+        silently drops the parsed event data and falls back to embedding the
+        raw (unconverted, possibly UTC) JSON-LD text directly in the LLM
+        prompt - letting the LLM attempt its own timezone conversion instead
+        of the reliable datetime arithmetic in _apply_json_ld_overrides().
+        """
+        s = raw.strip()
+        s = re.sub(r'^/\*\s*<!\[CDATA\[\s*\*/', '', s)
+        s = re.sub(r'/\*\s*\]\]>\s*\*/$', '', s)
+        s = re.sub(r'^<!\[CDATA\[', '', s)
+        s = re.sub(r'\]\]>$', '', s)
+        return s.strip()
+
     def extract_json_ld(self, html: str) -> Tuple[str, Optional[Dict[str, Any]]]:
         """
         Extract JSON-LD structured data from HTML.
@@ -43,7 +64,7 @@ class ContentProcessor:
 
         for match in matches:
             try:
-                data = json.loads(match.strip())
+                data = json.loads(self._strip_cdata_wrapper(match))
                 # Check if this is event data (has startDate or @type Event)
                 if isinstance(data, dict):
                     if data.get('@type') == 'Event' or 'startDate' in data:
@@ -140,9 +161,26 @@ class ContentProcessor:
         # Step 2: Extract main content as markdown
         main_content = self.html_to_markdown(html)
 
-        # If trafilatura failed, use the provided text
-        if not main_content and text:
+        # Trafilatura's boilerplate-removal heuristics can silently drop
+        # exactly the elements that matter for event extraction - e.g. a
+        # page's own date/time heading - even when its output is a
+        # reasonable *fraction* of the raw page text overall. A length-ratio
+        # check isn't a reliable enough signal to catch this on its own: on
+        # some BiblioCommons event pages, a list of past months' picks
+        # survives and pads the ratio comfortably past a "looks fine"
+        # threshold while the specific date/time widget for THIS event is
+        # still dropped. So rather than gamble on picking one or the other,
+        # always make the full raw text available too - redundant content
+        # costs a bit of prompt size, a silently missing date/time doesn't.
+        if not main_content:
             main_content = text
+        elif text:
+            main_content = (
+                main_content
+                + "\n\n## FULL PAGE TEXT (raw - the extraction above may have"
+                " missed something, e.g. a date/time heading):\n"
+                + text
+            )
 
         # Step 3: Build the final content with JSON-LD prominently at top
         parts = []
