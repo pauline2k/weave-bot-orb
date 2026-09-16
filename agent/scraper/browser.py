@@ -4,8 +4,9 @@ import base64
 import logging
 from typing import Optional, Dict, Any
 import aiohttp
-from playwright.async_api import async_playwright, Browser, Page, TimeoutError as PlaywrightTimeout
+from playwright.async_api import async_playwright, Browser, BrowserContext, Page, TimeoutError as PlaywrightTimeout
 from agent.core.config import settings
+from agent.core.time_utils import PACIFIC
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ class BrowserManager:
     def __init__(self):
         self.playwright = None
         self.browser: Optional[Browser] = None
+        self.context: Optional[BrowserContext] = None
 
     async def __aenter__(self):
         """Start browser context."""
@@ -36,10 +38,23 @@ class BrowserManager:
         self.browser = await self.playwright.chromium.launch(
             headless=settings.headless
         )
+        # Pin the browser's timezone explicitly rather than inheriting
+        # whatever the host machine/container happens to be configured
+        # with. Some sites (e.g. Discord's invite/event pages) render an
+        # event's date/time client-side by converting a stored UTC
+        # timestamp using the browser's local system timezone - if that
+        # defaults to UTC (a common default in cloud containers, unlike a
+        # developer's own machine), the page itself displays the wrong
+        # wall-clock time, and we'd faithfully (and wrongly) extract
+        # exactly that. Pinning this makes rendering deterministic and
+        # correct regardless of the underlying host's OS timezone.
+        self.context = await self.browser.new_context(timezone_id=str(PACIFIC))
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Close browser context."""
+        if self.context:
+            await self.context.close()
         if self.browser:
             await self.browser.close()
         if self.playwright:
@@ -161,10 +176,10 @@ class BrowserManager:
         Returns:
             Dictionary containing HTML, text, screenshot, and metadata
         """
-        if not self.browser:
+        if not self.browser or not self.context:
             raise RuntimeError("Browser not initialized. Use async context manager.")
 
-        page = await self.browser.new_page()
+        page = await self.context.new_page()
 
         partial_load = False
         try:
