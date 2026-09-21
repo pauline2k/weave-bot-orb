@@ -67,9 +67,8 @@
               {{event.title}}
             </strong>,
             {{ formatTime12h(event.start_datetime) }},
-            <strong>
-              {{ event.location?.venue }}
-              ({{ event.location?.neighborhood || event.location?.city || 'Oakland'}})</strong>.
+            {{ event.location?.venue }}
+            ({{ event.location?.neighborhood || event.location?.city || 'Oakland'}}).
             <span v-html="itemDescriptionHtml(event.description || '')"></span>
             [<a :href="event.source_url">{{event.source_url_provider || event.organizer?.name || event.source_url}}</a>]
             <button
