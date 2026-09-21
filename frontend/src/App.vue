@@ -56,7 +56,7 @@
       </div>
       <div v-for="(events, date) in groupedByDateAndSupplemental" :key="date" class="day">
         <p>
-          <strong><u>{{ formatDisplayDate(date) }}</u></strong>
+          <h3 style="text-align:center;">{{ formatDisplayDate(date) }}</h3>
         </p>
         <div v-for="event in events['false']">
           <p
@@ -67,8 +67,9 @@
               {{event.title}}
             </strong>,
             {{ formatTime12h(event.start_datetime) }},
-            {{ event.location?.venue }}
-            ({{ event.location?.neighborhood || event.location?.city || 'Oakland'}}).
+            <strong>
+              {{ event.location?.venue }}
+              ({{ event.location?.neighborhood || event.location?.city || 'Oakland'}})</strong>.
             <span v-html="itemDescriptionHtml(event.description || '')"></span>
             [<a :href="event.source_url">{{event.source_url_provider || event.organizer?.name || event.source_url}}</a>]
             <button
