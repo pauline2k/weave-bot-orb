@@ -1,6 +1,5 @@
 """Main FastAPI application."""
 import logging
-import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -37,10 +36,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+if len(settings.session_secret) < 32:
+    raise RuntimeError(
+        "SESSION_SECRET must be set to a random string of at least 32 characters "
+        "(e.g. `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`)"
+    )
+
+# max_age is a sliding window (1 day since last activity): require_session in
+# api/routes.py re-assigns the session on each authenticated request so the
+# cookie is refreshed.
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.environ.get(settings.session_secret),
+    secret_key=settings.session_secret,
     session_cookie="session",
+    max_age=24 * 60 * 60,
     https_only=settings.cookie_https_only,  # set true in prod if HTTPS-only
     same_site="lax",
 )

@@ -24,8 +24,13 @@ security = HTTPBasic()
 
 
 def require_session(request: Request):
-    if not request.session.get("user"):
+    user = request.session.get("user")
+    if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    # Starlette >= 1.0 only re-sends the session cookie when the session is
+    # modified. Re-assigning marks it modified, so the cookie is re-signed and
+    # max_age slides forward on every authenticated request.
+    request.session["user"] = user
 
 
 @router.post("/login")
