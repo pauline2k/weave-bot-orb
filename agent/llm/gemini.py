@@ -158,7 +158,6 @@ class GeminiExtractor(LLMExtractor):
 
         if screenshot_b64:
             logger.info(f"Including screenshot in parse")
-            logger.info(screenshot_b64)
             try:
                 image_bytes = base64.b64decode(screenshot_b64)
                 image = Image.open(io.BytesIO(image_bytes))

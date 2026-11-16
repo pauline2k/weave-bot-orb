@@ -1,30 +1,31 @@
 # Web framework
-fastapi>=0.104.0
-itsdangerous>=2.2.0
-uvicorn>=0.24.0
-pydantic>=2.5.0
-pydantic-settings>=2.1.0
+fastapi==0.141.1
+starlette==1.6.0
+itsdangerous==2.2.0
+uvicorn==0.53.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
 
 # Browser automation
-playwright>=1.40.0
+playwright==1.63.0
 
 # LLM
-google-generativeai>=0.3.0
-openai>=1.0.0
+google-generativeai==0.8.6
+openai==3.16.2
 
 # Configuration
-pyyaml>=6.0
+pyyaml==6.0.3
 
 # Content extraction
-trafilatura>=1.6.0
-html2text>=2020.1.16
+trafilatura==2.2.0
+html2text==2025.4.15
 
 # HTTP client (for callbacks)
-aiohttp>=3.9.0
+aiohttp==3.14.3
 
 # Image processing (for screenshots)
-Pillow>=10.0.0
+Pillow==12.3.0
 
 # Testing
-pytest>=7.0.0
-pytest-asyncio>=0.21.0
+pytest==9.1.1
+pytest-asyncio==1.4.0
